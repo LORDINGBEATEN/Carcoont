@@ -151,7 +151,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 23;   // à incrémenter à chaque mise en ligne
+  const VERSION = 24;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -335,7 +335,7 @@
         const p = predict(e), ok = isOk(p), ms = performance.now() - t0;
         const still = !!prevE && sim(e, prevE) >= STILL; prevE = e;
         drawOverlay(v, p, ok);
-        record(v, p, ok, ms);
+        if (mode !== 'learn') record(v, p, ok, ms);   // l'apprentissage ne doit pas fausser les statistiques d'un test
         if (mode === 'learn') learnTick(e, p, ok && still, still);
         else {   // vote : une carte est comptée quand elle est reconnue sur au moins 3 des 6 dernières images
           // vote sur les 8 dernières images : la même carte doit arriver en tête sur 5 d'entre elles, avec un écart moyen suffisant
