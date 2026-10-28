@@ -1,2 +1,3 @@
-Modèle : baloot-fan-v2 (osos3lom), licence MIT
-https://huggingface.co/osos3lom/baloot-fan-v2
+mobilenetv2-features.onnx : MobileNetV2 (ONNX Model Zoo, ImageNet), tête de classification retirée pour exposer les 1280 valeurs du pooling.
+Source : https://huggingface.co/webml/models (mobilenetv2-12.onnx)
+Licence du fichier non confirmée.

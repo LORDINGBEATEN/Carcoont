@@ -4,56 +4,71 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Compteur Manille</title>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <style>
-  :root { --bg: #0f5132; --panel: #fffdf6; --ink: #1c1c1c; --red: #c62828; --accent: #f2b705; --muted: #8a8a7a; }
+  :root { --bg: #0f5132; --panel: #fffdf6; --ink: #1c1c1c; --red: #c62828; --accent: #f2b705; --muted: #8a8a7a; --ok: #2e9e5b; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; background: var(--bg); color: #fff; font-family: -apple-system, system-ui, sans-serif;
     min-height: 100vh; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); user-select: none; }
   main { max-width: 640px; margin: 0 auto; }
-  .score { background: rgba(0,0,0,.25); border-radius: 16px; padding: 14px 18px; display: flex;
-    align-items: center; justify-content: space-between; }
+  .score { background: rgba(0,0,0,.25); border-radius: 16px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; }
   .score .big { font-size: 56px; font-weight: 800; line-height: 1; }
   .score .big small { font-size: 20px; font-weight: 500; opacity: .7; }
   .score .side { text-align: right; font-size: 14px; opacity: .9; line-height: 1.5; }
   .score .side b { font-size: 18px; }
+  .tabs { display: flex; gap: 8px; margin: 12px 0 0; }
+  .tabs button { flex: 1; padding: 10px 4px; border: 0; border-radius: 12px; font-size: 14px; font-weight: 700; background: rgba(255,255,255,.15); color: #fff; }
+  .tabs button.on { background: var(--accent); color: #222; }
   .cam { position: relative; margin: 12px auto; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 4/3; width: 100%; }
   .cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .cam video { object-fit: fill; }
-  .cam .off { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px;
-    font-size: 15px; opacity: .9; background: rgba(0,0,0,.5); }
-  .cam .flash { position: absolute; right: 10px; top: 10px; background: var(--accent); color: #222; font-weight: 800;
-    font-size: 30px; padding: 8px 14px; border-radius: 14px; opacity: 0; transition: opacity .4s; }
+  .cam .off { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; font-size: 15px; opacity: .9; background: rgba(0,0,0,.5); }
+  .cam .flash { position: absolute; right: 10px; top: 10px; background: var(--accent); color: #222; font-weight: 800; font-size: 30px; padding: 8px 14px; border-radius: 14px; opacity: 0; transition: opacity .4s; }
   .cam .flash.on { opacity: 1; transition: none; }
   .actions { display: flex; gap: 8px; margin: 12px 0; }
-  button.act { flex: 1; padding: 12px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600;
-    background: var(--accent); color: #222; }
+  button.act { flex: 1; padding: 12px 6px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 600; background: var(--accent); color: #222; }
   button.act.alt { background: rgba(255,255,255,.18); color: #fff; }
   button.act:disabled { opacity: .4; }
   .hint { font-size: 13px; opacity: .8; margin: 6px 2px 10px; line-height: 1.4; }
-  .dbg { font-family: monospace; font-size: 12px; opacity: .85; margin: 4px 2px 6px; min-height: 2.6em; white-space: pre-line; }
+  .dbg { font-family: monospace; font-size: 12px; opacity: .85; margin: 4px 2px 6px; min-height: 3.9em; white-space: pre-line; }
   .thr { display: flex; align-items: center; gap: 10px; font-size: 13px; opacity: .9; margin: 4px 2px 10px; }
   .thr input { flex: 1; }
-  body.analysis .score, body.analysis #deck, body.analysis .count-only { display: none; }
-  body:not(.analysis) #analysis { display: none; }
-  .tabs { display: flex; gap: 8px; margin: 12px 0 0; }
-  .tabs button { flex: 1; padding: 10px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 700; background: rgba(255,255,255,.15); color: #fff; }
-  .tabs button.on { background: var(--accent); color: #222; }
+  /* modes */
+  body:not([data-mode=an]) #analysis, body:not([data-mode=learn]) #learn { display: none; }
+  body[data-mode=an] .score, body[data-mode=an] #deck, body[data-mode=an] .count-only,
+  body[data-mode=learn] .score, body[data-mode=learn] #deck, body[data-mode=learn] .count-only { display: none; }
+  body[data-mode=learn] .cam { position: sticky; top: 6px; z-index: 10; margin-top: 6px; }
+  /* analyse */
   #analysis h3 { font-size: 14px; margin: 14px 2px 6px; opacity: .9; }
   .stats { background: rgba(0,0,0,.25); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }
   table.agg { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.agg th, table.agg td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.12); }
-  table.agg td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  table.agg td.n { text-align: right; }
   #repText { width: 100%; height: 38vh; border-radius: 12px; border: 0; padding: 10px; font: 12px/1.4 monospace; user-select: text; -webkit-user-select: text; margin-bottom: 8px; }
   .ent { display: flex; gap: 10px; background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
-  .ent img { width: 96px; height: auto; border-radius: 8px; flex: none; align-self: flex-start; }
+  .ent img { width: 80px; height: auto; border-radius: 8px; flex: none; align-self: flex-start; }
   .ent .nm { font-weight: 700; font-size: 15px; }
   .ent .near { opacity: .7; }
+  /* apprentissage */
+  .learn { background: rgba(0,0,0,.25); border-radius: 16px; padding: 12px; }
+  .lgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 8px 0; }
+  .lc { position: relative; border: 0; border-radius: 8px; height: 48px; padding: 0; background: var(--panel); color: var(--ink); font-size: 17px; font-weight: 800; line-height: 1.05; }
+  .lc.red { color: var(--red); }
+  .lc small { display: block; font-size: 15px; font-weight: 400; }
+  .lc.done { background: var(--accent); }
+  .lc.ok { background: var(--ok); color: #fff; }
+  .lc.ok.red { color: #ffd6d6; }
+  .lc.sel { outline: 3px solid #fff; }
+  .lc::after { content: attr(data-n); position: absolute; top: 1px; right: 4px; font-size: 10px; color: #4a3a00; }
+  .lc.ok::after { color: #fff; }
+  .fond { width: 100%; margin-top: 2px; }
+  .fond.done { background: var(--accent); color: #222; }
+  .fond.sel { outline: 3px solid #fff; }
+  /* compteur */
   .suit { margin-top: 14px; }
   .suit h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; }
   .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .card { background: var(--panel); color: var(--ink); border-radius: 10px; border: 0; padding: 10px 0 6px;
-    font-size: 24px; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
+  .card { background: var(--panel); color: var(--ink); border-radius: 10px; border: 0; padding: 10px 0 6px; font-size: 24px; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
   .card.red { color: var(--red); }
   .card .pts { font-size: 11px; font-weight: 600; color: var(--muted); }
   .card.taken { background: var(--accent); }
@@ -61,7 +76,7 @@
   .card.hit { outline: 3px solid #fff; }
 </style>
 </head>
-<body>
+<body data-mode="count">
 <main>
   <div class="score">
     <div class="big"><span id="total">0</span><small> / 60</small></div>
@@ -71,27 +86,22 @@
     </div>
   </div>
 
-  <div class="tabs"><button id="tabCount" class="on">Compteur</button><button id="tabAn">Analyse</button></div>
+  <div class="tabs"><button id="tabCount" class="on">Compteur</button><button id="tabLearn">Apprentissage</button><button id="tabAn">Analyse</button></div>
 
   <div class="cam" id="cam">
     <video id="video" playsinline muted></video>
     <canvas id="over"></canvas>
-    <div class="off" id="off">Touchez « Démarrer la caméra ».<br>Présentez les cartes une à une, bien visibles.</div>
+    <div class="off" id="off">Touchez « Démarrer la caméra ».<br>Placez chaque carte dans le cadre en pointillés.</div>
     <div class="flash" id="flash"></div>
   </div>
   <div class="dbg" id="debug">—</div>
-  <label class="thr">Seuil de confiance <input type="range" id="thr" min="5" max="90" value="12"><b id="thrv">12 %</b></label>
 
-  <label class="thr">Image analysée <select id="crop"><option value="square">Carré centré (non déformé)</option><option value="stretch">Étirée (toute l'image)</option></select></label>
-  <label class="thr">Moteur <select id="eng"><option value="wasm">Processeur (le plus sûr)</option><option value="webgpu">WebGPU (plus rapide)</option></select></label>
-  <div class="actions">
-    <button class="act" id="start">Démarrer la caméra</button>
-  </div>
-  <div class="actions count-only">
-    <button class="act alt" id="undo">↩︎ Annuler</button>
-    <button class="act alt" id="reset">Nouvelle donne</button>
-  </div>
-  <p class="hint count-only">Chaque carte est comptée une seule fois par donne, dès qu'elle est lue de façon stable. Touchez une carte ci-dessous pour corriger à la main.</p>
+  <section id="learn" class="learn">
+    <div class="hint" id="learnMsg" style="margin:0"></div>
+    <button class="act alt fond" id="fondBtn">1) Fond : filmez la table sans carte</button>
+    <div class="lgrid" id="lgrid"></div>
+    <div class="actions"><button class="act alt" id="clearTpl">Tout oublier</button><button class="act" id="doneLearn">Terminé</button></div>
+  </section>
 
   <section id="analysis">
     <div class="actions">
@@ -104,11 +114,21 @@
       <button class="act alt" id="showRep">Afficher le texte</button>
     </div>
     <textarea id="repText" readonly hidden></textarea>
-    <p class="hint">Tout ce que la caméra voit est mémorisé ici (même après rechargement). Les valeurs en direct sont lissées sur 1,5 s.</p>
+    <p class="hint">Tout ce que la caméra reconnaît est mémorisé ici, même après rechargement. Les valeurs en direct sont lissées sur 1,5 s.</p>
     <h3>Session</h3><div class="stats" id="stats"></div>
     <h3>Par carte</h3><table class="agg" id="aggT"></table>
-    <h3>Détections (la plus récente en haut)</h3><div id="entries"></div>
+    <h3>Reconnaissances (la plus récente en haut)</h3><div id="entries"></div>
   </section>
+
+  <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="50" max="99" value="80"><b id="thrv">80 %</b></label>
+  <div class="actions">
+    <button class="act" id="start">Démarrer la caméra</button>
+  </div>
+  <div class="actions count-only">
+    <button class="act alt" id="undo">↩︎ Annuler</button>
+    <button class="act alt" id="reset">Nouvelle donne</button>
+  </div>
+  <p class="hint count-only">Chaque carte est comptée une seule fois par donne. Touchez une carte ci-dessous pour corriger à la main.</p>
 
   <div id="deck"></div>
   <p class="hint" style="text-align:center;margin-top:20px">Compteur Manille · <b id="version"></b> · <span id="engine">modèle non chargé</span></p>
@@ -124,13 +144,15 @@
   const $ = id => document.getElementById(id);
   const ptsOf = id => VALUES.find(v => v.l === id.split('-')[1]).p;
   const suitOf = id => SUITS.find(s => s.id === id.split('-')[0]);
+  const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const VERSION = 13;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
-  let hist = [];                         // cartes vues sur les dernières images (vote)
+  let hist = [];                         // cartes reconnues sur les dernières images (vote)
 
-  // ---------- Affichage des 32 cartes ----------
+  // ---------- Compteur : les 32 cartes ----------
   SUITS.forEach(s => {
     const sec = document.createElement('section'); sec.className = 'suit';
     sec.innerHTML = `<h2><span>${s.sym} ${s.name}</span><span id="sub-${s.id}"></span></h2><div class="row"></div>`;
@@ -158,212 +180,110 @@
   }
   $('undo').onclick = () => { taken.pop(); render(); };
   $('reset').onclick = () => { if (!taken.length || confirm('Effacer la donne en cours ?')) { taken = []; hist = []; render(); } };
+  function flash(id) {
+    const f = $('flash'), s = suitOf(id);
+    f.textContent = cname(id); f.style.color = s.red ? '#c62828' : '#222'; f.classList.add('on');
+    const el = document.querySelector(`.card[data-id="${id}"]`); el.classList.add('hit');
+    if (navigator.vibrate) navigator.vibrate(30);
+    setTimeout(() => { f.classList.remove('on'); el.classList.remove('hit'); }, 500);
+  }
 
-  // ---------- Modèle de détection (baloot-fan-v2, YOLO11n, licence MIT) ----------
-  // Classes 0-31 : couleurs dans l'ordre cœur, carreau, trèfle, pique ; rangs A K Q J 10 9 8 7. Classe 32 = « autre » (2 à 6).
-  const M_SUITS = ['coeur', 'carreau', 'trefle', 'pique'], M_RANKS = ['A', 'R', 'D', 'V', '10', '9', '8', '7'];   // K→R, Q→D, J→V
-  const cardOfClass = c => `${M_SUITS[c >> 3]}-${M_RANKS[c & 7]}`;
-  const SIZE = 704;
+  // ---------- Reconnaissance par empreintes (MobileNetV2 + vos exemples) ----------
+  // Chaque image donne deux empreintes de 1280 valeurs : la carte entière et son coin (rang + couleur).
+  // On compare à vos exemples enregistrés ; le plus ressemblant donne la carte (cosinus).
   ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
-  let session = null;
-  const inCv = document.createElement('canvas'); inCv.width = inCv.height = SIZE;
-  const inCtx = inCv.getContext('2d', { willReadFrequently: true });
-  const inData = new Float32Array(3 * SIZE * SIZE);
+  const IN = 224, MEAN = [.485, .456, .406], STD = [.229, .224, .225];
+  let session = null, S = [];            // S : exemples {l, a, b}
+  const mkCv = () => { const c = document.createElement('canvas'); c.width = c.height = IN; return c.getContext('2d', { willReadFrequently: true }); };
+  const cx0 = mkCv(), cx1 = mkCv(), inBuf = new Float32Array(2 * 3 * IN * IN);
 
-  let crop = { sx: 0, sy: 0, sw: 1, sh: 1, vw: 1, vh: 1 };   // zone de l'image envoyée au modèle
-  function cropRect(v) {
-    const vw = v.videoWidth, vh = v.videoHeight;
-    if ($('crop').value === 'stretch') return { sx: 0, sy: 0, sw: vw, sh: vh, vw, vh };
-    const side = Math.min(vw, vh);
-    return { sx: (vw - side) / 2, sy: (vh - side) / 2, sw: side, sh: side, vw, vh };
+  function geometry(v) {   // cadre de la carte (5:7) centré dans l'image
+    const vw = v.videoWidth, vh = v.videoHeight, gh = Math.min(vh * .9, vw * .95 * 7 / 5), gw = gh * 5 / 7;
+    return { vw, vh, gw, gh, sx: (vw - gw) / 2, sy: (vh - gh) / 2 };
   }
-  // boîte du modèle (0..SIZE) -> fraction de l'image vidéo (0..1)
-  const toVid = (x, y) => [(crop.sx + x / SIZE * crop.sw) / crop.vw, (crop.sy + y / SIZE * crop.sh) / crop.vh];
-  function toTensor(src) {
-    crop = cropRect(src);
-    inCtx.drawImage(src, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, SIZE, SIZE);
-    const px = inCtx.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE;
-    for (let i = 0; i < n; i++) { inData[i] = px[i * 4] / 255; inData[n + i] = px[i * 4 + 1] / 255; inData[2 * n + i] = px[i * 4 + 2] / 255; }
-    return new ort.Tensor('float32', inData, [1, 3, SIZE, SIZE]);
+  const CORNER = { w: .34, h: .30 };   // coin haut-gauche du cadre
+  function fill(ctx, k) {
+    const px = ctx.getImageData(0, 0, IN, IN).data, n = IN * IN, o = k * 3 * n;
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) inBuf[o + c * n + i] = (px[i * 4 + c] / 255 - MEAN[c]) / STD[c];
   }
-  let sessionEng = '';
+  const unit = a => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; s = Math.sqrt(s) || 1; for (let i = 0; i < a.length; i++) a[i] /= s; return a; };
+  async function embed(v) {
+    const g = geometry(v);
+    cx0.drawImage(v, g.sx, g.sy, g.gw, g.gh, 0, 0, IN, IN);
+    cx1.drawImage(v, g.sx, g.sy, g.gw * CORNER.w, g.gh * CORNER.h, 0, 0, IN, IN);
+    fill(cx0, 0); fill(cx1, 1);
+    const out = (await session.run({ input: new ort.Tensor('float32', inBuf, [2, 3, IN, IN]) }))[session.outputNames[0]].data;
+    return { a: unit(Float32Array.from(out.subarray(0, 1280))), b: unit(Float32Array.from(out.subarray(1280, 2560))) };
+  }
   async function loadModel() {
-    const want = $('eng').value;
-    if (session && sessionEng === want) return;
-    session = null; $('engine').textContent = 'chargement du modèle…';
-    const [url, name] = want === 'webgpu' ? ['model/baloot-fan-v2.fp16.onnx', 'WebGPU'] : ['model/baloot-fan-v2.int8.onnx', 'processeur'];
-    try {
-      const s = await ort.InferenceSession.create(url, { executionProviders: [want] });
-      const out = await s.run({ images: new ort.Tensor('float32', new Float32Array(3 * SIZE * SIZE), [1, 3, SIZE, SIZE]) });   // essai à blanc
-      if (out.output0.type !== 'float32') throw new Error('sortie ' + out.output0.type);
-      session = s; sessionEng = want; $('engine').textContent = 'moteur : ' + name;
-    } catch (e) { $('engine').textContent = 'moteur en échec'; throw new Error(name + ' : ' + (e.message || e)); }
+    if (session) return;
+    $('engine').textContent = 'chargement du modèle…';
+    try { session = await ort.InferenceSession.create('model/mobilenetv2-features.onnx', { executionProviders: ['wasm'] }); }
+    catch (e) { $('engine').textContent = 'modèle en échec'; throw new Error('Chargement du modèle : ' + (e.message || e)); }
+    $('engine').textContent = 'moteur : processeur';
   }
-
-  function iou(a, b) {
-    const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-    if (w <= 0 || h <= 0) return 0;
-    const i = w * h; return i / ((a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - i);
+  const dot = (x, y) => { let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * y[i]; return s; };
+  const sim = (e, s) => .5 * (dot(e.a, s.a) + dot(e.b, s.b));
+  function predict(e) {   // meilleure ressemblance par étiquette, du plus au moins ressemblant
+    const best = {};
+    for (const s of S) { const v = sim(e, s); if (!(s.l in best) || v > best[s.l]) best[s.l] = v; }
+    const r = Object.entries(best).sort((x, y) => y[1] - x[1]);
+    return r.length ? { l: r[0][0], s: r[0][1], m: r[1] ? r[0][1] - r[1][1] : 1, l2: r[1] ? r[1][0] : null, s2: r[1] ? r[1][1] : 0, bg: best.fond ?? null } : null;
   }
-  function decode(out, thr) {   // sortie [1, 4+33, 10164] : cx, cy, w, h puis 33 scores de classe
-    const d = out.data, N = out.dims[2], C = out.dims[1] - 4, dets = [];
-    decode.top = { s: 0, c: -1 };
-    for (let i = 0; i < N; i++) {
-      let best = -1, bs = 0;
-      for (let c = 0; c < C; c++) { const v = d[(4 + c) * N + i]; if (v > bs) { bs = v; best = c; } }
-      if (bs > decode.top.s) decode.top = { s: bs, c: best };
-      if (bs < thr || best >= 32) continue;
-      const cx = d[i], cy = d[N + i], w = d[2 * N + i], h = d[3 * N + i];
-      dets.push({ id: cardOfClass(best), s: bs, x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 });
-    }
-    dets.sort((a, b) => b.s - a.s);
-    const keep = [];
-    for (const x of dets) if (keep.every(k => iou(k, x) < .5)) keep.push(x);
-    return keep;
-  }
+  const thr = () => $('thr').value / 100;
+  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= .015;
 
-  // ---------- Caméra et boucle de détection ----------
-  let stream, running = false;
-  const STABLE = 2;   // images consécutives avant de compter une carte
+  // exemples conservés sur l'appareil (IndexedDB)
+  const db = {
+    h: null,
+    open() { return new Promise(res => { try { const r = indexedDB.open('manille-deck-v1', 1); r.onupgradeneeded = () => r.result.createObjectStore('s', { autoIncrement: true }); r.onsuccess = () => { this.h = r.result; res(); }; r.onerror = () => res(); } catch (e) { res(); } }); },
+    all() { return new Promise(res => { if (!this.h) return res([]); const q = this.h.transaction('s').objectStore('s').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => res([]); }); },
+    add(x) { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').add(x); } catch (e) {} },
+    clear() { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').clear(); } catch (e) {} },
+  };
+  const addSample = (l, e) => { const x = { l, a: e.a, b: e.b }; S.push(x); db.add(x); };
+  const nOf = l => S.filter(x => x.l === l).length;
 
+  // ---------- Caméra ----------
+  let stream, running = false, paused = false, mode = 'count';
   function layout() {
-    const v = $('video'), vw = v.videoWidth, vh = v.videoHeight;
-    $('cam').style.width = `min(100%, ${55 * vw / vh}vh)`; $('cam').style.aspectRatio = vw + '/' + vh;
-    const o = $('over'); o.width = SIZE; o.height = Math.round(SIZE * vh / vw);
+    const v = $('video'), vw = v.videoWidth, vh = v.videoHeight, o = $('over');
+    $('cam').style.width = `min(100%, ${(mode === 'learn' ? 38 : 55) * vw / vh}vh)`; $('cam').style.aspectRatio = vw + '/' + vh;
+    o.width = vw; o.height = vh;
   }
-  function drawBoxes(dets) {
-    const o = $('over'), x = o.getContext('2d'), W = o.width, H = o.height;
-    x.clearRect(0, 0, W, H);
-    const [ax, ay] = toVid(0, 0), [bx, by] = toVid(SIZE, SIZE);   // zone analysée
-    x.setLineDash([10, 8]); x.lineWidth = 2; x.strokeStyle = 'rgba(255,255,255,.6)';
-    x.strokeRect(ax * W, ay * H, (bx - ax) * W, (by - ay) * H); x.setLineDash([]);
-    x.lineWidth = 3; x.font = 'bold 22px sans-serif';
-    for (const d of dets) {
-      const have = taken.includes(d.id), [x0, y0] = toVid(d.x0, d.y0), [x1, y1] = toVid(d.x1, d.y1);
-      x.strokeStyle = have ? '#2e9e5b' : '#f2b705'; x.fillStyle = x.strokeStyle;
-      x.strokeRect(x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H);
-      const label = cname(d.id) + ' ' + Math.round(d.s * 100);
-      x.fillRect(x0 * W, y0 * H - 26, x.measureText(label).width + 10, 26);
-      x.fillStyle = '#111'; x.fillText(label, x0 * W + 5, y0 * H - 6);
+  function drawOverlay(v, p, ok) {
+    const o = $('over'), x = o.getContext('2d'), g = geometry(v), u = o.width / 640;
+    x.clearRect(0, 0, o.width, o.height); x.setLineDash([12 * u, 8 * u]); x.lineWidth = 3 * u;
+    x.strokeStyle = ok ? '#2e9e5b' : 'rgba(255,255,255,.85)'; x.strokeRect(g.sx, g.sy, g.gw, g.gh);
+    x.strokeStyle = '#f2b705'; x.strokeRect(g.sx, g.sy, g.gw * CORNER.w, g.gh * CORNER.h); x.setLineDash([]);
+    if (p && p.l !== 'fond') {
+      const label = cname(p.l) + ' ' + Math.round(p.s * 100) + ' %'; x.font = `bold ${22 * u}px sans-serif`;
+      x.fillStyle = ok ? '#2e9e5b' : '#f2b705'; x.fillRect(g.sx, g.sy + g.gh, x.measureText(label).width + 14 * u, 30 * u);
+      x.fillStyle = ok ? '#fff' : '#111'; x.fillText(label, g.sx + 7 * u, g.sy + g.gh + 22 * u);
     }
   }
-  // ---------- Analyse : mémorisation de ce que voit le modèle ----------
-  const AN_KEY = 'manille-analyse-v1', MAX_ENT = 60;
-  let an = load(AN_KEY, { frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
-  let anDirty = false, paused = false, lastRender = 0, lastDbg = 0, win = [];
-  const cname = id => { const [su, r] = id.split('-'); return r + suitOf(id).sym; };
-  const topName = c => c === 32 ? 'carte 2-6' : c >= 0 ? cname(cardOfClass(c)) : '–';
-  const hhmmss = t => new Date(t).toLocaleTimeString('fr-FR');
-  setInterval(() => { if (anDirty) { store(AN_KEY, an); anDirty = false; } }, 2000);
-
-  function snap(v, dets) {   // vignette annotée de l'image analysée
-    const w = 240, h = Math.round(w * v.videoHeight / v.videoWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
-    const x = c.getContext('2d'); x.drawImage(v, 0, 0, w, h); x.lineWidth = 2; x.strokeStyle = '#f2b705'; x.fillStyle = '#f2b705'; x.font = 'bold 13px sans-serif';
-    for (const d of dets) { const [x0, y0] = toVid(d.x0, d.y0), [x1, y1] = toVid(d.x1, d.y1); x.strokeRect(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h); x.fillText(cname(d.id) + ' ' + Math.round(d.s * 100), x0 * w + 2, y0 * h - 3); }
-    return c.toDataURL('image/jpeg', .6);
-  }
-  function record(v, dets, ms) {
-    const top = decode.top, now = Date.now();
-    an.frames++; an.msSum += ms; an.eng = $('engine').textContent + ' · image ' + ($('crop').value === 'square' ? 'carrée' : 'étirée') + ' · seuil ' + $('thr').value + ' %';
-    if (top.s > an.top.s) an.top = { s: top.s, id: topName(top.c) };
-    for (const d of dets) {
-      const a = an.agg[d.id] || (an.agg[d.id] = { n: 0, sum: 0, max: 0, last: 0 });
-      a.n++; a.sum += d.s; a.max = Math.max(a.max, d.s); a.last = now;
-    }
-    if (dets.length) an.hit++;
-    // une entrée par « apparition » : tant que les mêmes cartes restent visibles, on garde la meilleure image
-    const key = dets.length ? dets.map(d => d.id).sort().join(',') : (top.s >= .1 ? 'near:' + top.c : '');
-    if (key) {
-      const best = dets.length ? Math.max(...dets.map(d => d.s)) : top.s, cur = an.entries[0];
-      if (cur && cur.key === key && now - cur.t < 4000) {
-        cur.t = now; cur.n++;
-        if (best > cur.best + .05) { cur.best = best; cur.ids = dets.map(d => ({ id: d.id, s: +d.s.toFixed(2) })); cur.thumb = snap(v, dets); }
-      } else {
-        an.entries.unshift({ key, t: now, n: 1, best, ms: Math.round(ms), near: dets.length ? null : { c: top.c, s: +top.s.toFixed(2) },
-          ids: dets.map(d => ({ id: d.id, s: +d.s.toFixed(2) })), thumb: snap(v, dets) });
-        if (an.entries.length > MAX_ENT) an.entries.length = MAX_ENT;
-      }
-    }
-    anDirty = true;
-  }
-  function renderAnalysis() {
-    const f = an.frames;
-    $('stats').innerHTML = `${f} images analysées · ${f ? Math.round(an.hit / f * 100) : 0} % avec une carte détectée · ${f ? Math.round(an.msSum / f) : 0} ms par image<br>`
-      + `Meilleur score brut de la session : <b>${Math.round(an.top.s * 100)} %</b> (${an.top.id || '–'})<br>${an.eng || ''}`;
-    const rows = Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max);
-    $('aggT').innerHTML = rows.length ? '<tr><th>Carte</th><th class="n">Vue</th><th class="n">Max</th><th class="n">Moy.</th></tr>'
-      + rows.map(([id, a]) => `<tr><td>${cname(id)}</td><td class="n">${a.n}×</td><td class="n">${Math.round(a.max * 100)} %</td><td class="n">${Math.round(a.sum / a.n * 100)} %</td></tr>`).join('')
-      : '<tr><td>Aucune carte détectée pour l\'instant.</td></tr>';
-    $('entries').innerHTML = an.entries.map(e => `<div class="ent"><img src="${e.thumb}" alt=""><div>`
-      + (e.near ? `<div class="nm near">Presque : ${topName(e.near.c)} ${Math.round(e.near.s * 100)} %</div><div class="near">sous le seuil, non compté</div>`
-        : `<div class="nm">${e.ids.map(d => cname(d.id) + ' ' + Math.round(d.s * 100) + ' %').join(' · ')}</div><div>meilleur : ${Math.round(e.best * 100)} %</div>`)
-      + `<div class="near">${hhmmss(e.t)} · ${e.n} images</div></div></div>`).join('') || '<div class="hint">Rien mémorisé.</div>';
-  }
-  function report() {
-    const f = an.frames, L = [`Compteur Manille v${VERSION} · ${an.eng}`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % avec détection, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
-      `Meilleur score brut : ${Math.round(an.top.s * 100)} % (${an.top.id})`, '', 'Par carte (vue, max, moyenne) :'];
-    Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max).forEach(([id, a]) => L.push(`  ${cname(id)} : ${a.n}×, ${Math.round(a.max * 100)} %, ${Math.round(a.sum / a.n * 100)} %`));
-    L.push('', 'Détections (récentes d\'abord) :');
-    an.entries.forEach(e => L.push(`  ${hhmmss(e.t)} ` + (e.near ? `presque ${topName(e.near.c)} ${Math.round(e.near.s * 100)} %` : e.ids.map(d => cname(d.id) + ' ' + Math.round(d.s * 100) + ' %').join(', ')) + ` (${e.n} images)`));
-    return L.join('\n');
-  }
-  $('tabCount').onclick = () => setTab(false); $('tabAn').onclick = () => setTab(true);
-  function setTab(on) { document.body.classList.toggle('analysis', on); $('tabAn').classList.toggle('on', on); $('tabCount').classList.toggle('on', !on); if (on) renderAnalysis(); }
-  $('freeze').onclick = () => { paused = !paused; $('freeze').textContent = paused ? '▶ Reprendre' : '⏸ Figer'; };
-  $('clearAn').onclick = () => { if (confirm('Effacer toute l\'analyse mémorisée ?')) { an = { frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' }; store(AN_KEY, an); renderAnalysis(); } };
-  $('showRep').onclick = () => {   // texte sélectionnable : appui long > Tout sélectionner > Copier
-    const t = $('repText'); t.hidden = !t.hidden; $('showRep').textContent = t.hidden ? 'Afficher le texte' : 'Masquer le texte';
-    if (!t.hidden) { t.value = report(); t.focus(); t.select(); t.setSelectionRange(0, t.value.length); }
-  };
-  $('shareRep').onclick = async () => {   // feuille de partage du téléphone (Messages, Mail, Notes…)
-    const text = report();
-    if (!navigator.share) { $('showRep').click(); return; }
-    try { await navigator.share({ title: 'Analyse Compteur Manille', text }); } catch (e) { /* annulé */ }
-  };
-  $('copyRep').onclick = async () => {
-    const t = report();
-    try { await navigator.clipboard.writeText(t); $('copyRep').textContent = 'Copié ✓'; }
-    catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); $('copyRep').textContent = 'Copié ✓'; } catch (e2) { prompt('Copiez le rapport :', t); } ta.remove(); }
-    setTimeout(() => { $('copyRep').textContent = 'Copier le rapport'; }, 1500);
-  };
-  // affichage en direct lissé : meilleur score de chaque carte sur les 1,5 dernières secondes
-  function liveText(dets, ms) {
-    const t = Date.now(); win.push({ t, dets, top: decode.top }); while (win.length && t - win[0].t > 1500) win.shift();
-    const m = {}; let top = { s: 0, c: -1 };
-    win.forEach(w => { w.dets.forEach(d => { if (!m[d.id] || d.s > m[d.id]) m[d.id] = d.s; }); if (w.top.s > top.s) top = w.top; });
-    const ids = Object.entries(m).sort((a, b) => b[1] - a[1]).map(([id, sc]) => `${cname(id)} ${Math.round(sc * 100)} %`);
-    return (ids.length ? ids.join(' · ') : 'aucune carte détectée') + `\nmeilleur score (1,5 s) : ${Math.round(top.s * 100)} % (${topName(top.c)}) · ${Math.round(ms)} ms`;
-  }
-
   async function loop() {
     while (running) {
       const v = $('video');
       if (paused) { await new Promise(r => setTimeout(r, 100)); continue; }
       if (v.readyState >= 2 && v.videoWidth) {
         const t0 = performance.now();
-        let dets = [];
-        try { dets = decode((await session.run({ images: toTensor(v) })).output0, $('thr').value / 100); }
-        catch (e) { $('debug').textContent = 'Erreur de détection : ' + e.message; await new Promise(r => setTimeout(r, 500)); continue; }
-        drawBoxes(dets);
-        // vote : une carte est comptée quand elle apparaît sur au moins 3 des 8 dernières images (les scores du modèle fluctuent beaucoup)
-        hist.push(new Set(dets.map(d => d.id))); if (hist.length > 8) hist.shift();
-        for (const id of new Set(hist.flatMap(h => [...h]))) if (!taken.includes(id) && hist.filter(h => h.has(id)).length >= 3) { taken.push(id); render(); flash(id); }
-        const ms = performance.now() - t0;
-        record(v, dets, ms);
-        const tn = Date.now();
-        const txt = liveText(dets, ms);
+        let e;
+        try { e = await embed(v); } catch (er) { $('debug').textContent = 'Erreur : ' + er.message; await new Promise(r => setTimeout(r, 500)); continue; }
+        const p = predict(e), ok = isOk(p), ms = performance.now() - t0;
+        drawOverlay(v, p, ok);
+        record(v, p, ok, ms);
+        if (mode === 'learn') learnTick(e, p, ok);
+        else {   // vote : une carte est comptée quand elle est reconnue sur au moins 3 des 6 dernières images
+          hist.push(ok ? p.l : null); if (hist.length > 6) hist.shift();
+          for (const id of new Set(hist)) if (id && !taken.includes(id) && hist.filter(h => h === id).length >= 3) { taken.push(id); render(); flash(id); }
+        }
+        const tn = Date.now(), txt = liveText(p, ms);
         if (tn - lastDbg > 400) { $('debug').textContent = txt; lastDbg = tn; }
-        if (document.body.classList.contains('analysis') && tn - lastRender > 1000) { renderAnalysis(); lastRender = tn; }
+        if (mode === 'an' && tn - lastRender > 1000) { renderAnalysis(); lastRender = tn; }
       }
       await new Promise(r => setTimeout(r, 10));
     }
-  }
-  function flash(id) {
-    const f = $('flash'), s = suitOf(id);
-    f.textContent = id.split('-')[1] + s.sym; f.style.color = s.red ? '#c62828' : '#222'; f.classList.add('on');
-    const el = document.querySelector(`.card[data-id="${id}"]`); el.classList.add('hit');
-    if (navigator.vibrate) navigator.vibrate(30);
-    setTimeout(() => { f.classList.remove('on'); el.classList.remove('hit'); }, 500);
   }
   async function start() {
     $('start').disabled = true; $('start').textContent = 'Chargement…';
@@ -385,7 +305,154 @@
   $('start').onclick = () => (running ? stop() : start());
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
 
-  const VERSION = 12;   // à incrémenter à chaque mise en ligne
+  async function setMode(m) {
+    if (m === 'learn' && !running) await start();
+    mode = m; document.body.dataset.mode = m;
+    ['Count', 'Learn', 'An'].forEach(k => $('tab' + k).classList.toggle('on', k.toLowerCase() === m));
+    target = null; phase = 'idle'; hist = [];
+    if (running) layout();
+    if (m === 'learn') { renderLearn(); window.scrollTo(0, 0); }
+    if (m === 'an') renderAnalysis();
+  }
+  $('tabCount').onclick = () => setMode('count'); $('tabLearn').onclick = () => setMode('learn'); $('tabAn').onclick = () => setMode('an');
+  $('doneLearn').onclick = () => setMode('count');
+
+  // ---------- Apprentissage ----------
+  // 1) « Fond » : on filme la table sans carte.  2) on touche une carte, on la montre : 12 exemples sont pris tout seuls.
+  // 3) on retire puis on remontre la carte : si elle est reconnue, la case passe au vert.
+  const NEED = 12;
+  let verified = load('manille-ver-v1', []);
+  let target = null, phase = 'idle', got = 0, lastCap = 0, stableN = 0, absentN = 0, seenAbsent = false, recN = 0, failN = 0, recId = null;
+  const BG_SIM = .88;   // en dessous de cette ressemblance avec le fond, on considère qu'une carte est présente
+
+  function renderLearn() {
+    $('lgrid').innerHTML = SUITS.map(su => VALUES.map(v => {
+      const id = `${su.id}-${v.l}`, n = nOf(id);
+      return `<button class="lc${su.red ? ' red' : ''}${n ? ' done' : ''}${verified.includes(id) ? ' ok' : ''}${target === id ? ' sel' : ''}" data-id="${id}" data-n="${n || ''}">${v.l}<small>${su.sym}</small></button>`;
+    }).join('')).join('');
+    $('fondBtn').classList.toggle('done', nOf('fond') >= NEED); $('fondBtn').classList.toggle('sel', target === 'fond');
+    $('fondBtn').textContent = nOf('fond') >= NEED ? `Fond enregistré (${nOf('fond')} images) · refaire` : '1) Fond : filmez la table sans carte';
+    if (!$('learnMsg').dataset.keep) $('learnMsg').textContent =
+      target === 'fond' ? 'Ne mettez aucune carte devant la caméra…' :
+      target && phase === 'collect' ? `Montrez la carte dans le cadre et bougez-la légèrement (${got}/${NEED})` :
+      target && phase === 'verify' ? 'Mémorisée. Retirez la carte, puis remontrez-la pour vérifier.' :
+      nOf('fond') < NEED ? 'Commencez par « Fond » : filmez la table sans carte.' :
+      verified.length === 32 ? 'Tout est reconnu ✓ Touchez « Terminé ».' : 'Touchez la carte que vous allez montrer. Vert = mémorisée et reconnue.';
+  }
+  function say(msg, ms = 2500) {
+    const m = $('learnMsg'); m.textContent = msg; m.dataset.keep = '1';
+    clearTimeout(say.t); say.t = setTimeout(() => { delete m.dataset.keep; renderLearn(); }, ms);
+  }
+  const buzz = p => { if (navigator.vibrate) navigator.vibrate(p); };
+  function pick(id) {
+    if (id !== 'fond' && nOf('fond') < NEED) return say('Enregistrez d\'abord le « Fond » (table sans carte).');
+    target = target === id ? null : id; got = 0; stableN = 0; recN = 0; lastCap = 0;
+    phase = target ? 'collect' : 'idle'; renderLearn();
+  }
+  $('lgrid').onclick = e => { const b = e.target.closest('.lc'); if (b) pick(b.dataset.id); };
+  $('fondBtn').onclick = () => pick('fond');
+  $('clearTpl').onclick = () => {
+    if (!confirm('Oublier tout l\'apprentissage ?')) return;
+    S = []; db.clear(); verified = []; store('manille-ver-v1', verified); target = null; phase = 'idle'; renderLearn();
+  };
+  function learnTick(e, p, ok) {
+    const now = performance.now(), present = p && p.bg !== null ? p.bg < BG_SIM : false;
+    if (target === 'fond') {                                       // le fond : on prend des images sans carte
+      if (now - lastCap > 250) { addSample('fond', e); lastCap = now; got++; if (got >= NEED) { target = null; phase = 'idle'; buzz(30); say('Fond enregistré ✓'); } renderLearn(); }
+      return;
+    }
+    if (target && phase === 'collect') {                           // la carte : 12 exemples dès qu'elle est bien visible
+      if (!present) { stableN = 0; return; }
+      if (++stableN < 3 || now - lastCap < 250) return;
+      addSample(target, e); lastCap = now; got++;
+      if (got >= NEED) { phase = 'verify'; seenAbsent = false; recN = 0; failN = 0; absentN = 0; buzz(30); }
+      renderLearn(); return;
+    }
+    if (!present) { recN = 0; if (++absentN >= 3) seenAbsent = true; return; }
+    absentN = 0;
+    if (!ok) { recN = 0; if (phase === 'verify' && seenAbsent && ++failN === 40) { failN = 0; say('Pas reconnue : replacez la carte bien droite, ou touchez-la pour ajouter des exemples.', 3500); } return; }
+    recN = p.l === recId ? recN + 1 : 1; recId = p.l;
+    if (recN < 3 || (phase === 'verify' && !seenAbsent)) return;
+    if (nOf(p.l) && !verified.includes(p.l)) {                     // reconnue : la case passe au vert
+      verified.push(p.l); store('manille-ver-v1', verified); buzz([30, 40, 30]);
+      if (p.l === target) { target = null; phase = 'idle'; }
+      renderLearn(); say('Reconnue ✓ ' + cname(p.l), 1500);
+    }
+  }
+
+  // ---------- Analyse : mémorisation de ce que voit l'application ----------
+  const AN_KEY = 'manille-analyse-v2', MAX_ENT = 60, fresh = () => ({ frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
+  let an = load(AN_KEY, fresh()), anDirty = false, lastRender = 0, lastDbg = 0, win = [];
+  const hhmmss = t => new Date(t).toLocaleTimeString('fr-FR');
+  setInterval(() => { if (anDirty) { store(AN_KEY, an); anDirty = false; } }, 2000);
+
+  function snap(v) {   // vignette de la carte analysée
+    const g = geometry(v), w = 120, h = Math.round(w * g.gh / g.gw), c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(v, g.sx, g.sy, g.gw, g.gh, 0, 0, w, h); return c.toDataURL('image/jpeg', .6);
+  }
+  function record(v, p, ok, ms) {
+    const now = Date.now(); an.frames++; an.msSum += ms; an.eng = $('engine').textContent + ' · seuil ' + $('thr').value + ' %';
+    if (!p) return;
+    if (p.l !== 'fond' && p.s > an.top.s) an.top = { s: p.s, id: cname(p.l) };
+    if (ok) { an.hit++; const a = an.agg[p.l] || (an.agg[p.l] = { n: 0, sum: 0, max: 0 }); a.n++; a.sum += p.s; a.max = Math.max(a.max, p.s); }
+    const key = ok ? p.l : (p.l !== 'fond' && p.s >= .6 ? 'near:' + p.l : ''), cur = an.entries[0];
+    if (!key) return;
+    if (cur && cur.key === key && now - cur.t < 4000) {
+      cur.t = now; cur.n++;
+      if (p.s > cur.best + .02) { cur.best = p.s; cur.m = p.m; cur.thumb = snap(v); }
+    } else {
+      an.entries.unshift({ key, t: now, n: 1, l: p.l, best: p.s, m: p.m, l2: p.l2, s2: p.s2, near: !ok, thumb: snap(v) });
+      if (an.entries.length > MAX_ENT) an.entries.length = MAX_ENT;
+    }
+    anDirty = true;
+  }
+  const entLine = e => (e.near ? `presque ${cname(e.l)}` : cname(e.l)) + ` ${Math.round(e.best * 100)} %` + (e.l2 && e.l2 !== 'fond' ? ` (2e : ${cname(e.l2)} ${Math.round(e.s2 * 100)} %)` : '');
+  function renderAnalysis() {
+    const f = an.frames;
+    $('stats').innerHTML = `${f} images analysées · ${f ? Math.round(an.hit / f * 100) : 0} % avec une carte reconnue · ${f ? Math.round(an.msSum / f) : 0} ms par image<br>`
+      + `Meilleure ressemblance de la session : <b>${Math.round(an.top.s * 100)} %</b> (${an.top.id || '–'})<br>${an.eng || ''} · ${S.length} exemples`;
+    const rows = Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max);
+    $('aggT').innerHTML = rows.length ? '<tr><th>Carte</th><th class="n">Vue</th><th class="n">Max</th><th class="n">Moy.</th></tr>'
+      + rows.map(([id, a]) => `<tr><td>${cname(id)}</td><td class="n">${a.n}×</td><td class="n">${Math.round(a.max * 100)} %</td><td class="n">${Math.round(a.sum / a.n * 100)} %</td></tr>`).join('')
+      : '<tr><td>Aucune carte reconnue pour l\'instant.</td></tr>';
+    $('entries').innerHTML = an.entries.map(e => `<div class="ent"><img src="${e.thumb}" alt=""><div>`
+      + `<div class="nm${e.near ? ' near' : ''}">${entLine(e)}</div><div class="near">${hhmmss(e.t)} · ${e.n} images · écart avec le 2e : ${Math.round((e.m || 0) * 100)} pts</div></div></div>`).join('') || '<div class="hint">Rien mémorisé.</div>';
+  }
+  function report() {
+    const f = an.frames, L = [`Compteur Manille v${VERSION} · ${an.eng} · ${S.length} exemples`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % reconnues, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
+      `Meilleure ressemblance : ${Math.round(an.top.s * 100)} % (${an.top.id})`, '', 'Par carte (vue, max, moyenne) :'];
+    Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max).forEach(([id, a]) => L.push(`  ${cname(id)} : ${a.n}×, ${Math.round(a.max * 100)} %, ${Math.round(a.sum / a.n * 100)} %`));
+    L.push('', 'Reconnaissances (récentes d\'abord) :');
+    an.entries.forEach(e => L.push(`  ${hhmmss(e.t)} ${entLine(e)} (${e.n} images)`));
+    return L.join('\n');
+  }
+  function liveText(p, ms) {   // meilleur score de chaque carte sur les 1,5 dernières secondes : évite le clignotement
+    const t = Date.now(); win.push({ t, p }); while (win.length && t - win[0].t > 1500) win.shift();
+    const m = {}; let bg = null;
+    win.forEach(w => { if (!w.p) return; const q = w.p; if (q.l !== 'fond' && (!(q.l in m) || q.s > m[q.l])) m[q.l] = q.s; if (q.bg !== null) bg = bg === null ? q.bg : Math.min(bg, q.bg); });
+    const r = Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id, sc]) => `${cname(id)} ${Math.round(sc * 100)} %`);
+    return (S.length ? (r.length ? r.join(' · ') : 'rien de ressemblant') : 'aucun exemple : allez dans Apprentissage')
+      + `\nressemblance au fond : ${bg === null ? '–' : Math.round(bg * 100) + ' %'} (carte présente si < ${Math.round(BG_SIM * 100)} %)\n${Math.round(ms)} ms par image`;
+  }
+  $('showRep').onclick = () => {   // texte sélectionnable : appui long > Tout sélectionner > Copier
+    const t = $('repText'); t.hidden = !t.hidden; $('showRep').textContent = t.hidden ? 'Afficher le texte' : 'Masquer le texte';
+    if (!t.hidden) { t.value = report(); t.focus(); t.select(); t.setSelectionRange(0, t.value.length); }
+  };
+  $('shareRep').onclick = async () => {
+    const text = report();
+    if (!navigator.share) { $('showRep').click(); return; }
+    try { await navigator.share({ title: 'Analyse Compteur Manille', text }); } catch (e) { /* annulé */ }
+  };
+  $('copyRep').onclick = async () => {
+    const t = report();
+    try { await navigator.clipboard.writeText(t); $('copyRep').textContent = 'Copié ✓'; }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); $('copyRep').textContent = 'Copié ✓'; } catch (e2) { prompt('Copiez le rapport :', t); } ta.remove(); }
+    setTimeout(() => { $('copyRep').textContent = 'Copier le rapport'; }, 1500);
+  };
+  $('freeze').onclick = () => { paused = !paused; $('freeze').textContent = paused ? '▶ Reprendre' : '⏸ Figer'; };
+  $('clearAn').onclick = () => { if (confirm('Effacer toute l\'analyse mémorisée ?')) { an = fresh(); store(AN_KEY, an); renderAnalysis(); } };
+
+  (async () => { await db.open(); S = await db.all(); })();
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
