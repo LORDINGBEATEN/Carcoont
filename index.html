@@ -21,7 +21,7 @@
   .tabs button.on { background: var(--accent); color: #222; }
   .cam { position: relative; margin: 12px auto; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 4/3; width: 100%; }
   .cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  .cam video { object-fit: fill; }
+  .cam video { object-fit: fill; opacity: 0; }   /* l'image est redessinée sur un canvas : la couche vidéo du navigateur est invisible */
   .cam .off { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; font-size: 15px; opacity: .9; background: rgba(0,0,0,.5); }
   .cam .flash { position: absolute; right: 10px; top: 10px; background: var(--accent); color: #222; font-weight: 800; font-size: 30px; padding: 8px 14px; border-radius: 14px; opacity: 0; transition: opacity .4s; }
   .cam .flash.on { opacity: 1; transition: none; }
@@ -90,6 +90,7 @@
 
   <div class="cam" id="cam">
     <video id="video" playsinline muted></video>
+    <canvas id="view"></canvas>
     <canvas id="over"></canvas>
     <div class="off" id="off">Touchez « Démarrer la caméra ».<br>Placez chaque carte dans le cadre en pointillés.</div>
     <div class="flash" id="flash"></div>
@@ -148,7 +149,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 20;   // à incrémenter à chaque mise en ligne
+  const VERSION = 21;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -293,6 +294,17 @@
       + `cadre ${c.offsetWidth}x${c.offsetHeight} · élément vidéo ${v.offsetWidth}x${v.offsetHeight} · calque ${o.width}x${o.height} · fenêtre ${innerWidth}x${innerHeight} · `
       + `orientation ${(screen.orientation && screen.orientation.type) || '?'} · mode ${mode} · ${navigator.userAgent.replace(/\(.*?\)/, '').slice(0, 60)}`;
   }
+  // Aperçu dessiné par l'application (et non par la couche vidéo du navigateur, qui peut déformer l'image au 2e démarrage sur iOS)
+  function paint(id) {
+    if (!running || id !== loopId) return;
+    const v = $('video'), c = $('view');
+    if (!paused && v.readyState >= 2 && v.videoWidth) {
+      const w = Math.min(v.videoWidth, 540), h = Math.round(w * v.videoHeight / v.videoWidth);
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      c.getContext('2d').drawImage(v, 0, 0, w, h);
+    }
+    requestAnimationFrame(() => paint(id));
+  }
   let loopId = 0;   // une seule boucle d'analyse à la fois, même si on redémarre vite la caméra
   async function loop(id) {
     while (running && id === loopId) {
@@ -332,14 +344,14 @@
       const v = freshVideo(); v.srcObject = stream; await v.play();
       for (let i = 0; i < 50 && !(v.videoWidth && v.videoHeight); i++) await new Promise(r => setTimeout(r, 40));   // dimensions du nouveau flux
       layout(); $('off').hidden = true; hist = [];
-      running = true; $('start').textContent = 'Arrêter'; loop(++loopId);
+      running = true; $('start').textContent = 'Arrêter'; loop(++loopId); paint(loopId);
     } catch (e) { $('off').hidden = false; $('off').textContent = 'Erreur : ' + (e.message || e); $('start').textContent = 'Démarrer la caméra'; }
     $('start').disabled = false;
   }
   function stop() {
     running = false; loopId++; if (stream) stream.getTracks().forEach(t => t.stop());
     $('video').srcObject = null; prevE = null;   // l'ancien format ne doit pas rester pour le prochain démarrage
-    $('over').getContext('2d').clearRect(0, 0, 9999, 9999);
+    $('over').getContext('2d').clearRect(0, 0, 9999, 9999); $('view').getContext('2d').clearRect(0, 0, 9999, 9999);
     $('off').hidden = false; $('off').textContent = 'Caméra arrêtée.'; $('start').textContent = 'Démarrer la caméra';
   }
   $('video').onresize = () => { if (running && $('video').videoWidth) layout(); };   // le format du flux a changé (rotation, nouvelle caméra)
