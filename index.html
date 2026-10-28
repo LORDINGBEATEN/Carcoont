@@ -36,11 +36,20 @@
   .hint { font-size: 13px; opacity: .8; margin: 6px 2px 10px; line-height: 1.4; }
   .learn { background: rgba(0,0,0,.25); border-radius: 16px; padding: 12px; margin-bottom: 12px; }
   .learn h3 { margin: 0 0 6px; font-size: 15px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-  .chip { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 18px; font-weight: 700; background: var(--panel); color: var(--ink); }
-  .chip.red { color: var(--red); }
-  .chip.sel { outline: 3px solid var(--accent); }
-  .chip small { font-size: 10px; display: block; color: var(--muted); font-weight: 600; }
+  .lgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 8px 0; }
+  .lc { position: relative; border: 0; border-radius: 8px; height: 48px; padding: 0; background: var(--panel); color: var(--ink);
+    font-size: 17px; font-weight: 800; line-height: 1.05; }
+  .lc.red { color: var(--red); }
+  .lc small { display: block; font-size: 15px; font-weight: 400; }
+  .lc.done { background: var(--accent); }
+  .lc.done::after { content: attr(data-n); position: absolute; top: 1px; right: 4px; font-size: 10px; color: #4a3a00; }
+  .lc:active { transform: scale(.92); }
+  .learn .actions { margin: 6px 0 0; }
+  /* mode apprentissage : caméra fixée en haut, grille juste dessous, le reste masqué */
+  body.learning .score, body.learning .dbg, body.learning .main-actions, body.learning #deck, body.learning .ver { display: none; }
+  body.learning { padding-top: 6px; }
+  body.learning .cam { position: sticky; top: 6px; z-index: 10; margin-top: 0; }
+  body.learning .learn { margin-bottom: 0; }
   .dbg { display: flex; gap: 10px; align-items: center; font-family: monospace; font-size: 12px; opacity: .85; margin: 4px 2px 10px; }
   .dbg canvas { background: #000; width: 66px; height: 118px; border-radius: 4px; flex: none; }
   .suit { margin-top: 14px; }
@@ -74,27 +83,24 @@
   </div>
   <div class="dbg"><canvas id="dbgc" width="99" height="177"></canvas><div id="debug">—</div></div>
 
-  <div class="actions">
+  <div class="actions main-actions">
     <button class="act" id="start">Démarrer la caméra</button>
     <button class="act alt" id="learnBtn">Apprentissage</button>
   </div>
-  <div class="actions">
+  <div class="actions main-actions">
     <button class="act alt" id="undo">↩︎ Annuler</button>
     <button class="act alt" id="reset">Nouvelle donne</button>
   </div>
 
   <div class="learn" id="learn" hidden>
-    <h3>Apprentissage de votre jeu</h3>
-    <p class="hint"><b>Le plus simple :</b> placez une carte dans le cadre, puis touchez cette même carte dans la liste ci-dessous. Sinon, choisissez son <b>rang</b> et sa <b>couleur</b>, puis « Enregistrer ». Huit cartes suffisent si elles couvrent les 8 rangs et les 4 couleurs (par ex. 10♥, As♦, Roi♠, Dame♣, Valet♥, 9♦, 8♠, 7♣). Ajouter d'autres exemples améliore la lecture.</p>
-    <div class="chips" id="rankChips"></div>
-    <div class="chips" id="suitChips"></div>
-    <div class="actions"><button class="act" id="saveTpl">Enregistrer cette carte</button>
-      <button class="act alt" id="clearTpl">Tout oublier</button></div>
-    <div class="hint" id="learnMsg"></div>
+    <div class="hint" id="learnMsg" style="margin:0"></div>
+    <div class="lgrid" id="lgrid"></div>
+    <div class="actions"><button class="act alt" id="clearTpl">Tout oublier</button>
+      <button class="act" id="doneLearn">Terminé</button></div>
   </div>
 
   <div id="deck"></div>
-  <p class="hint" style="text-align:center;margin-top:20px">Compteur Manille · <b id="version"></b></p>
+  <p class="hint ver" style="text-align:center;margin-top:20px">Compteur Manille · <b id="version"></b></p>
 </main>
 
 <script>
@@ -122,7 +128,6 @@
       b.className = 'card' + (s.red ? ' red' : ''); b.dataset.id = id;
       b.innerHTML = `${v.l}<span>${s.sym}</span><span class="pts">${v.p} pt${v.p > 1 ? 's' : ''}</span>`;
       b.onclick = () => {
-        if (!$('learn').hidden) return enroll(v.l, s.id);   // en apprentissage, toucher une carte l'enregistre
         const i = taken.indexOf(id); i >= 0 ? taken.splice(i, 1) : taken.push(id); render();
       };
       sec.querySelector('.row').appendChild(b);
@@ -271,7 +276,7 @@
   function layoutGuide() {
     const v = $('video'), vw = v.videoWidth, vh = v.videoHeight, g = $('guide');
     const gh = Math.min(vh * .9, vw * .95 * 7 / 5), gw = gh * 5 / 7;
-    $('cam').style.width = `min(100%, ${55 * vw / vh}vh)`; $('cam').style.aspectRatio = vw + '/' + vh;
+    $('cam').style.width = `min(100%, ${(document.body.classList.contains('learning') ? 34 : 55) * vw / vh}vh)`; $('cam').style.aspectRatio = vw + '/' + vh;
     Object.assign(g.style, { left: ((vw - gw) / 2 / vw * 100) + '%', top: ((vh - gh) / 2 / vh * 100) + '%',
       width: (gw / vw * 100) + '%', height: (gh / vh * 100) + '%' });
   }
@@ -329,34 +334,43 @@
   $('start').onclick = () => (running ? stop() : start());
 
   // ---------- Apprentissage ----------
-  let selR = null, selS = null;
+  // tpl.c : cartes déjà enregistrées (pour afficher les coches)
+  if (!tpl.c) tpl.c = [];
+  const learning = () => document.body.classList.contains('learning');
   function renderLearn() {
-    $('rankChips').innerHTML = VALUES.map(v => `<button class="chip${selR === v.l ? ' sel' : ''}" data-r="${v.l}">${v.l}<small>${tpl.r.filter(t => t.l === v.l).length} ex.</small></button>`).join('');
-    $('suitChips').innerHTML = SUITS.map(s => `<button class="chip${s.red ? ' red' : ''}${selS === s.id ? ' sel' : ''}" data-s="${s.id}">${s.sym}<small>${tpl.s.filter(t => t.l === s.id).length} ex.</small></button>`).join('');
+    $('lgrid').innerHTML = SUITS.map(su => VALUES.map(v => {
+      const id = `${su.id}-${v.l}`, n = tpl.c.filter(x => x === id).length;
+      return `<button class="lc${su.red ? ' red' : ''}${n ? ' done' : ''}" data-id="${id}" data-n="${n || ''}">${v.l}<small>${su.sym}</small></button>`;
+    }).join('')).join('');
     const miss = [...VALUES.filter(v => !tpl.r.some(t => t.l === v.l)).map(v => v.l), ...SUITS.filter(s => !tpl.s.some(t => t.l === s.id)).map(s => s.sym)];
-    $('learnMsg').textContent = miss.length ? 'Il manque encore : ' + miss.join(' ') : 'Tout est appris. Vous pouvez scanner.';
+    if (!$('learnMsg').dataset.keep) $('learnMsg').textContent = miss.length
+      ? 'Visez une carte dans le cadre, puis touchez-la ci-dessous. Il manque : ' + miss.join(' ')
+      : 'Tout est appris ✓ Ajoutez des exemples si besoin, puis « Terminé ».';
   }
-  $('learn').onclick = e => {
-    const b = e.target.closest('.chip'); if (!b) return;
-    if (b.dataset.r) selR = b.dataset.r; if (b.dataset.s) selS = b.dataset.s; renderLearn();
-  };
-  $('learnBtn').onclick = () => { $('learn').hidden = !$('learn').hidden; renderLearn(); };
+  function say(msg) {
+    const m = $('learnMsg'); m.textContent = msg; m.dataset.keep = '1';
+    clearTimeout(say.t); say.t = setTimeout(() => { delete m.dataset.keep; renderLearn(); }, 1800);
+  }
+  async function setLearning(on) {
+    if (on && !running) await start();
+    document.body.classList.toggle('learning', on); $('learn').hidden = !on;
+    if (running) layoutGuide();
+    if (on) { renderLearn(); window.scrollTo(0, 0); }
+  }
+  $('learnBtn').onclick = () => setLearning(!learning());
+  $('doneLearn').onclick = () => setLearning(false);
+  $('lgrid').onclick = e => { const b = e.target.closest('.lc'); if (b) { const [su, r] = b.dataset.id.split('-'); enroll(r, su); } };
   function enroll(rank, suit) {   // un seul geste : toucher la carte vue par la caméra
-    if (!last || last.none) { $('learnMsg').textContent = 'Aucune carte lue : placez-la dans le cadre (caméra démarrée).'; return; }
-    if (isRed(suit) !== last.red) { $('learnMsg').textContent = 'Cette couleur ne correspond pas au rouge/noir vu par la caméra.'; return; }
-    tpl.r.push({ l: rank, f: last.rf }); tpl.s.push({ l: suit, f: last.sf }); store('manille-tpl-v1', tpl);
-    renderLearn(); $('learnMsg').textContent = 'Enregistré : ' + rank + suitOf(suit + '-x').sym + '. ' + $('learnMsg').textContent;
+    if (!last || last.none) return say('Aucune carte lue : placez-la dans le cadre.');
+    if (isRed(suit) !== last.red) return say('Cette couleur ne correspond pas au rouge/noir vu par la caméra.');
+    tpl.r.push({ l: rank, f: last.rf }); tpl.s.push({ l: suit, f: last.sf }); tpl.c.push(`${suit}-${rank}`);
+    store('manille-tpl-v1', tpl);
+    if (navigator.vibrate) navigator.vibrate(30);
+    renderLearn(); say('Enregistré : ' + rank + suitOf(suit + '-x').sym);
   }
-  $('saveTpl').onclick = () => {
-    if (!last || last.none) { $('learnMsg').textContent = 'Aucune carte lue : placez-la dans le cadre (caméra démarrée).'; return; }
-    if (!selR || !selS) { $('learnMsg').textContent = 'Choisissez le rang et la couleur de la carte.'; return; }
-    if (isRed(selS) !== last.red) { $('learnMsg').textContent = 'La couleur choisie ne correspond pas au rouge/noir vu par la caméra.'; return; }
-    tpl.r.push({ l: selR, f: last.rf }); tpl.s.push({ l: selS, f: last.sf }); store('manille-tpl-v1', tpl);
-    selR = selS = null; renderLearn();
-  };
-  $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
+  $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [], c: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
 
-  const VERSION = 4;  // à incrémenter à chaque mise en ligne
+  const VERSION = 5;  // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
