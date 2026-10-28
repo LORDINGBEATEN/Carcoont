@@ -94,6 +94,7 @@
   </div>
 
   <div id="deck"></div>
+  <p class="hint" style="text-align:center;margin-top:20px">Compteur Manille · <b id="version"></b></p>
 </main>
 
 <script>
@@ -298,6 +299,8 @@
   };
   $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
 
+  const VERSION = 3;   // à incrémenter à chaque mise en ligne
+  $('version').textContent = 'v' + VERSION;
   render();
 </script>
 </body>
