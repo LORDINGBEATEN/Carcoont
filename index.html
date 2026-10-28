@@ -148,7 +148,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 19;   // à incrémenter à chaque mise en ligne
+  const VERSION = 20;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -287,6 +287,12 @@
     old.replaceWith(v); return v;
   }
   let actual = '', nFrames = 0;   // dimensions réelles de l'image reçue (pour le diagnostic)
+  function camInfo() {   // tout ce qui peut expliquer une image déformée, pour le rapport
+    const v = $('video'), t = stream && stream.getVideoTracks()[0], st = t ? t.getSettings() : {}, c = $('cam'), o = $('over');
+    return `Caméra : vidéo ${v.videoWidth}x${v.videoHeight} · image ${actual || '?'} · flux ${st.width}x${st.height} (${st.facingMode || '?'}, ${st.aspectRatio ? st.aspectRatio.toFixed(3) : '?'}) · `
+      + `cadre ${c.offsetWidth}x${c.offsetHeight} · élément vidéo ${v.offsetWidth}x${v.offsetHeight} · calque ${o.width}x${o.height} · fenêtre ${innerWidth}x${innerHeight} · `
+      + `orientation ${(screen.orientation && screen.orientation.type) || '?'} · mode ${mode} · ${navigator.userAgent.replace(/\(.*?\)/, '').slice(0, 60)}`;
+  }
   let loopId = 0;   // une seule boucle d'analyse à la fois, même si on redémarre vite la caméra
   async function loop(id) {
     while (running && id === loopId) {
@@ -458,7 +464,7 @@
       + `<div class="nm${e.near ? ' near' : ''}">${entLine(e)}</div><div class="near">${hhmmss(e.t)} · ${e.n} images · écart avec le 2e : ${Math.round((e.m || 0) * 100)} pts</div></div></div>`).join('') || '<div class="hint">Rien mémorisé.</div>';
   }
   function report() {
-    const f = an.frames, L = [`Compteur Manille v${VERSION} · ${an.eng} · ${S.length} exemples`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % reconnues, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
+    const f = an.frames, L = [camInfo(), `Compteur Manille v${VERSION} · ${an.eng} · ${S.length} exemples`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % reconnues, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
       `Meilleure ressemblance : ${Math.round(an.top.s * 100)} % (${an.top.id})`, '', 'Par carte (vue, max, moyenne) :'];
     Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max).forEach(([id, a]) => L.push(`  ${cname(id)} : ${a.n}×, ${Math.round(a.max * 100)} %, ${Math.round(a.sum / a.n * 100)} %`));
     L.push('', 'Reconnaissances (récentes d\'abord) :');
