@@ -72,7 +72,7 @@
     <div class="badge" id="badge" hidden></div>
     <div class="flash" id="flash"></div>
   </div>
-  <div class="dbg"><canvas id="dbgc" width="66" height="118"></canvas><div id="debug">—</div></div>
+  <div class="dbg"><canvas id="dbgc" width="99" height="177"></canvas><div id="debug">—</div></div>
 
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
@@ -85,7 +85,7 @@
 
   <div class="learn" id="learn" hidden>
     <h3>Apprentissage de votre jeu</h3>
-    <p class="hint">Placez une carte dans le cadre, choisissez son <b>rang</b> et sa <b>couleur</b>, puis « Enregistrer ». Huit cartes suffisent si elles couvrent les 8 rangs et les 4 couleurs (par ex. 10♥, As♦, Roi♠, Dame♣, Valet♥, 9♦, 8♠, 7♣). Ajouter d'autres exemples améliore la lecture.</p>
+    <p class="hint"><b>Le plus simple :</b> placez une carte dans le cadre, puis touchez cette même carte dans la liste ci-dessous. Sinon, choisissez son <b>rang</b> et sa <b>couleur</b>, puis « Enregistrer ». Huit cartes suffisent si elles couvrent les 8 rangs et les 4 couleurs (par ex. 10♥, As♦, Roi♠, Dame♣, Valet♥, 9♦, 8♠, 7♣). Ajouter d'autres exemples améliore la lecture.</p>
     <div class="chips" id="rankChips"></div>
     <div class="chips" id="suitChips"></div>
     <div class="actions"><button class="act" id="saveTpl">Enregistrer cette carte</button>
@@ -121,7 +121,10 @@
       const id = `${s.id}-${v.l}`, b = document.createElement('button');
       b.className = 'card' + (s.red ? ' red' : ''); b.dataset.id = id;
       b.innerHTML = `${v.l}<span>${s.sym}</span><span class="pts">${v.p} pt${v.p > 1 ? 's' : ''}</span>`;
-      b.onclick = () => { const i = taken.indexOf(id); i >= 0 ? taken.splice(i, 1) : taken.push(id); render(); };
+      b.onclick = () => {
+        if (!$('learn').hidden) return enroll(v.l, s.id);   // en apprentissage, toucher une carte l'enregistre
+        const i = taken.indexOf(id); i >= 0 ? taken.splice(i, 1) : taken.push(id); render();
+      };
       sec.querySelector('.row').appendChild(b);
     });
     $('deck').appendChild(sec);
@@ -143,14 +146,14 @@
   $('reset').onclick = () => { if (!taken.length || confirm('Effacer la donne en cours ?')) { taken = []; render(); } };
 
   // ---------- Analyse d'une image de carte (300x420, carte alignée dans le cadre) ----------
-  const CW = 300, CH = 420, CX0 = 6, CX1 = 72, CY0 = 8, CY1 = 126;   // zone du coin chiffré
+  const CW = 450, CH = 630, CX0 = 9, CX1 = 108, CY0 = 12, CY1 = 189;   // zone du coin chiffré
   const GW = 16, GH = 24;                                             // taille des vignettes comparées
 
   function glyph(lum, ink, w, run, rgb) {
     // boîte englobante de l'encre dans la bande de lignes [y0,y1], puis vignette GWxGH
     let x0 = w, x1 = -1;
     for (let y = run[0]; y <= run[1]; y++) for (let x = 0; x < w; x++) if (ink[y * w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
-    if (x1 - x0 < 3) return null;
+    if (x1 - x0 < 5) return null;
     const bw = x1 - x0 + 1, bh = run[1] - run[0] + 1, f = new Array(GW * GH).fill(0);
     let red = 0, n = 0;
     for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
@@ -160,10 +163,43 @@
       for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) { t++; if (ink[y * w + x]) c++; }
       f[gy * GW + gx] = +(c / t).toFixed(2);
     }
+    // léger flou 3x3 : rend la comparaison moins sensible aux décalages d'un pixel
+    const g = f.slice();
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      let s = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy >= 0 && yy < GH && xx >= 0 && xx < GW) { const k = dx || dy ? 1 : 2; s += g[yy * GW + xx] * k; n += k; }
+      }
+      f[y * GW + x] = +(s / n).toFixed(2);
+    }
     for (let y = run[0]; y <= run[1]; y++) for (let x = x0; x <= x1; x++) if (ink[y * w + x]) {
       const i = (y * w + x) * 4; red += rgb[i] - (rgb[i + 1] + rgb[i + 2]) / 2; n++;
     }
     return { f, red: n ? red / n : 0, box: [x0, run[0], bw, bh] };
+  }
+
+  function otsu(lum) {   // seuil encre/papier robuste aux éclairages inégaux
+    const hist = new Array(256).fill(0); let sum = 0;
+    for (const v of lum) { hist[Math.min(255, v | 0)]++; sum += v; }
+    let wB = 0, sB = 0, max = 0, t = 0;
+    for (let i = 0; i < 256; i++) {
+      wB += hist[i]; if (!wB) continue;
+      const wF = lum.length - wB; if (!wF) break;
+      sB += i * hist[i];
+      const between = wB * wF * (sB / wB - (sum - sB) / wF) ** 2;
+      if (between > max) { max = between; t = i; }
+    }
+    return t;
+  }
+
+  // moyenne des 3 dernières lectures de même couleur : lisse le bruit de la caméra
+  let buf = [];
+  function smooth(a) {
+    if (a.none) { buf = []; return a; }
+    buf.push(a); if (buf.length > 3) buf.shift();
+    const same = buf.filter(x => x.red === a.red), avg = k => a[k].map((_, i) => same.reduce((s, x) => s + x[k][i], 0) / same.length);
+    return { ...a, rf: avg('rf'), sf: avg('sf') };
   }
 
   function analyze(cv) {
@@ -172,16 +208,16 @@
     const lum = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) lum[i] = rgb[i * 4] * .3 + rgb[i * 4 + 1] * .59 + rgb[i * 4 + 2] * .11;
     const paper = Float32Array.from(lum).sort()[Math.floor(w * h * .8)];
-    const ink = new Uint8Array(w * h), thr = paper * .7;
+    const ink = new Uint8Array(w * h), thr = Math.max(40, Math.min(otsu(lum), paper * .8));
     for (let i = 0; i < w * h; i++) ink[i] = lum[i] < thr ? 1 : 0;
     // bandes de lignes contenant de l'encre (écarts de 2 lignes tolérés)
     const runs = []; let cur = null, gap = 0;
     for (let y = 0; y < h; y++) {
       let c = 0; for (let x = 0; x < w; x++) c += ink[y * w + x];
-      if (c >= 2) { if (!cur) cur = [y, y]; else cur[1] = y; gap = 0; }
-      else if (cur && ++gap > 2) { if (cur[1] - cur[0] >= 8) runs.push(cur); cur = null; gap = 0; }
+      if (c >= 3) { if (!cur) cur = [y, y]; else cur[1] = y; gap = 0; }
+      else if (cur && ++gap > 3) { if (cur[1] - cur[0] >= 12) runs.push(cur); cur = null; gap = 0; }
     }
-    if (cur && cur[1] - cur[0] >= 8) runs.push(cur);
+    if (cur && cur[1] - cur[0] >= 12) runs.push(cur);
     const dbg = { ink, w, h, runs };
     if (paper < 90 || runs.length < 2) return { dbg, none: true };
     const r = glyph(lum, ink, w, runs[0], rgb), s = glyph(lum, ink, w, runs[1], rgb);
@@ -189,11 +225,25 @@
     return { dbg, rf: r.f, sf: s.f, red: s.red > 35 };
   }
 
-  const dist = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]); return d / a.length; };
-  function nearest(f, list) {
-    let best = null;
-    for (const t of list) { const d = dist(f, t.f); if (!best || d < best.d) best = { l: t.l, d }; }
+  // distance tolérante à un décalage d'une case dans chaque direction
+  const dist = (a, b) => {
+    let best = 9;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      let d = 0;
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const yy = y + dy, xx = x + dx;
+        d += Math.abs(a[y * GW + x] - (yy >= 0 && yy < GH && xx >= 0 && xx < GW ? b[yy * GW + xx] : 0));
+      }
+      if (d / a.length < best) best = d / a.length;
+    }
     return best;
+  };
+  function nearest(f, list) {
+    const by = {};   // meilleure distance par étiquette
+    for (const t of list) { const d = dist(f, t.f); if (by[t.l] === undefined || d < by[t.l]) by[t.l] = d; }
+    const ds = Object.entries(by).sort((a, b) => a[1] - b[1]);
+    if (!ds.length) return null;
+    return { l: ds[0][0], d: ds[0][1], m: ds[1] ? ds[1][1] - ds[0][1] : 1 };   // m : écart avec le 2e choix
   }
   const isRed = l => l === 'coeur' || l === 'carreau';
   const MAXD = 0.22;
@@ -202,7 +252,8 @@
     const r = nearest(a.rf, tpl.r), s = nearest(a.sf, tpl.s.filter(t => isRed(t.l) === a.red));
     if (!r || !s) return { msg: 'couleur inconnue' };
     const msg = `rang ${r.l} (${r.d.toFixed(2)}) · ${s.l} (${s.d.toFixed(2)})`;
-    return r.d < MAXD && s.d < MAXD ? { id: `${s.l}-${r.l}`, msg } : { msg: 'incertain : ' + msg };
+    const sure = r.d < MAXD && s.d < MAXD && r.m > .015 && s.m > .015;
+    return sure ? { id: `${s.l}-${r.l}`, msg } : { msg: 'incertain : ' + msg };
   }
 
   // ---------- Caméra ----------
@@ -235,7 +286,7 @@
       const v = $('video');
       if (v.readyState >= 2 && v.videoWidth) {
         cropFromVideo();
-        const a = analyze(card); last = a; drawDebug(a.dbg);
+        const raw = analyze(card); drawDebug(raw.dbg); const a = smooth(raw); last = a;
         let id = null, msg = 'pas de carte';
         if (!a.none) { const r = recognize(a); id = r.id || null; msg = r.msg; }
         $('debug').textContent = msg; $('badge').textContent = id ? id.replace('-', ' ') : msg.split(':')[0];
@@ -290,6 +341,12 @@
     if (b.dataset.r) selR = b.dataset.r; if (b.dataset.s) selS = b.dataset.s; renderLearn();
   };
   $('learnBtn').onclick = () => { $('learn').hidden = !$('learn').hidden; renderLearn(); };
+  function enroll(rank, suit) {   // un seul geste : toucher la carte vue par la caméra
+    if (!last || last.none) { $('learnMsg').textContent = 'Aucune carte lue : placez-la dans le cadre (caméra démarrée).'; return; }
+    if (isRed(suit) !== last.red) { $('learnMsg').textContent = 'Cette couleur ne correspond pas au rouge/noir vu par la caméra.'; return; }
+    tpl.r.push({ l: rank, f: last.rf }); tpl.s.push({ l: suit, f: last.sf }); store('manille-tpl-v1', tpl);
+    renderLearn(); $('learnMsg').textContent = 'Enregistré : ' + rank + suitOf(suit + '-x').sym + '. ' + $('learnMsg').textContent;
+  }
   $('saveTpl').onclick = () => {
     if (!last || last.none) { $('learnMsg').textContent = 'Aucune carte lue : placez-la dans le cadre (caméra démarrée).'; return; }
     if (!selR || !selS) { $('learnMsg').textContent = 'Choisissez le rang et la couleur de la carte.'; return; }
@@ -299,7 +356,7 @@
   };
   $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
 
-  const VERSION = 3;   // à incrémenter à chaque mise en ligne
+  const VERSION = 4;  // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
