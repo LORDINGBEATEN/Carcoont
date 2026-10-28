@@ -149,7 +149,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 21;   // à incrémenter à chaque mise en ligne
+  const VERSION = 22;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -450,9 +450,10 @@
   function record(v, p, ok, ms) {
     const now = Date.now(); an.frames++; an.msSum += ms; an.eng = $('engine').textContent + ' · seuil ' + $('thr').value + ' % · écart ' + $('mar').value + ' pts';
     if (!p) return;
+    if (p.l === 'fond') an.fond = (an.fond || 0) + 1;
     if (p.l !== 'fond' && p.s > an.top.s) an.top = { s: p.s, id: cname(p.l) };
     if (ok) { an.hit++; const a = an.agg[p.l] || (an.agg[p.l] = { n: 0, sum: 0, max: 0 }); a.n++; a.sum += p.s; a.max = Math.max(a.max, p.s); }
-    const key = ok ? p.l : (p.l !== 'fond' && p.s >= .6 ? 'near:' + p.l : ''), cur = an.entries[0];
+    const key = ok ? p.l : (p.l !== 'fond' && p.s >= .4 ? 'near:' + p.l : ''), cur = an.entries[0];
     if (!key) return;
     if (cur && cur.key === key && now - cur.t < 4000) {
       cur.t = now; cur.n++;
@@ -479,6 +480,10 @@
     const f = an.frames, L = [camInfo(), `Compteur Manille v${VERSION} · ${an.eng} · ${S.length} exemples`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % reconnues, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
       `Meilleure ressemblance : ${Math.round(an.top.s * 100)} % (${an.top.id})`, '', 'Par carte (vue, max, moyenne) :'];
     Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max).forEach(([id, a]) => L.push(`  ${cname(id)} : ${a.n}×, ${Math.round(a.max * 100)} %, ${Math.round(a.sum / a.n * 100)} %`));
+    const learned = SUITS.flatMap(su => VALUES.map(v => `${su.id}-${v.l}`)).filter(id => nOf(id));
+    L.push('', `Images où « pas de carte » l'emporte : ${f ? Math.round((an.fond || 0) / f * 100) : 0} %`);
+    L.push(`Cartes apprises (${learned.length}/32) : ` + (learned.map(id => `${cname(id)}×${nOf(id)}${verified.includes(id) ? '✓' : ''}`).join(' ') || 'aucune'));
+    L.push('Cartes jamais apprises : ' + (SUITS.flatMap(su => VALUES.map(v => `${su.id}-${v.l}`)).filter(id => !nOf(id)).map(cname).join(' ') || 'aucune'));
     L.push('', 'Reconnaissances (récentes d\'abord) :');
     an.entries.forEach(e => L.push(`  ${hhmmss(e.t)} ${entLine(e)} (${e.n} images)`));
     return L.join('\n');
