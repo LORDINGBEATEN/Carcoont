@@ -121,7 +121,7 @@
   </section>
 
   <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="20" max="95" value="55"><b id="thrv">55 %</b></label>
-  <label class="thr">Écart avec le 2e choix <input type="range" id="mar" min="0" max="40" value="10"><b id="marv">10 pts</b></label>
+  <label class="thr">Écart avec le 2e choix <input type="range" id="mar" min="0" max="40" value="4"><b id="marv">4 pts</b></label>
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
   </div>
@@ -148,7 +148,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 16;   // à incrémenter à chaque mise en ligne
+  const VERSION = 17;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -235,18 +235,18 @@
     for (const x of cards) for (let i = 0; i < 1280; i++) { mu.a[i] += x.a[i] / cards.length; mu.b[i] += x.b[i] / cards.length; }
     for (const x of S) { x.ca = center(x.a, mu.a); x.cb = center(x.b, mu.b); }
   }
-  function predict(e) {   // meilleure ressemblance par étiquette, du plus au moins ressemblant
-    const ca = center(e.a, mu.a), cb = center(e.b, mu.b), best = {}; let bg = null;
+  function predict(e) {   // ressemblance par étiquette (moyenne de ses 3 meilleurs exemples), de la plus à la moins ressemblante
+    const ca = center(e.a, mu.a), cb = center(e.b, mu.b), by = {}; let bg = null;
     for (const s of S) {
-      const v = .5 * (dot(ca, s.ca) + dot(cb, s.cb)); if (!(s.l in best) || v > best[s.l]) best[s.l] = v;
+      (by[s.l] || (by[s.l] = [])).push(.5 * (dot(ca, s.ca) + dot(cb, s.cb)));
       if (s.l === 'fond') { const r = sim(e, s); if (bg === null || r > bg) bg = r; }
     }
-    const r = Object.entries(best).sort((x, y) => y[1] - x[1]);
+    const r = Object.entries(by).map(([l, v]) => { v.sort((x, y) => y - x); const k = v.slice(0, 3); return [l, k.reduce((x, y) => x + y, 0) / k.length]; }).sort((x, y) => y[1] - x[1]);
     return r.length ? { l: r[0][0], s: r[0][1], m: r[1] ? r[0][1] - r[1][1] : 1, l2: r[1] ? r[1][0] : null, s2: r[1] ? r[1][1] : 0, bg } : null;
   }
   const thr = () => $('thr').value / 100;
-  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= $('mar').value / 100;   // assez ressemblante et nettement devant la 2e
-  const STILL = .95;   // une image ne compte que si elle ressemble à la précédente : on ignore les images pendant qu'on change de carte
+  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= .02;   // assez ressemblante et devant la 2e (l'écart moyen est jugé par le vote)
+  const STILL = .90;   // une image est ignorée si elle ressemble trop peu à la précédente (carte en mouvement)
   let prevE = null;
 
   // exemples conservés sur l'appareil (IndexedDB)
@@ -292,8 +292,12 @@
         record(v, p, ok, ms);
         if (mode === 'learn') learnTick(e, p, ok && still, still);
         else {   // vote : une carte est comptée quand elle est reconnue sur au moins 3 des 6 dernières images
-          hist.push(ok && still ? p.l : null); if (hist.length > 6) hist.shift();
-          for (const id of new Set(hist)) if (id && !taken.includes(id) && hist.filter(h => h === id).length >= 3) { taken.push(id); render(); flash(id); }
+          // vote sur les 8 dernières images : la même carte doit arriver en tête sur 5 d'entre elles, avec un écart moyen suffisant
+          hist.push(ok && still ? { l: p.l, m: p.m } : null); if (hist.length > 8) hist.shift();
+          for (const id of new Set(hist.filter(Boolean).map(h => h.l))) {
+            const w = hist.filter(h => h && h.l === id);
+            if (!taken.includes(id) && w.length >= 5 && w.reduce((x, h) => x + h.m, 0) / w.length >= $('mar').value / 100) { taken.push(id); render(); flash(id); }
+          }
         }
         const tn = Date.now(), txt = liveText(p, ms);
         if (tn - lastDbg > 400) { $('debug').textContent = txt; lastDbg = tn; }
