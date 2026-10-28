@@ -147,7 +147,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 14;   // à incrémenter à chaque mise en ligne
+  const VERSION = 15;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -294,7 +294,7 @@
       await loadModel();
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false });
       const v = $('video'); v.srcObject = stream; await v.play();
-      if (!v.videoWidth) await new Promise(r => v.addEventListener('loadedmetadata', r, { once: true }));
+      for (let i = 0; i < 50 && !(v.videoWidth && v.videoHeight); i++) await new Promise(r => setTimeout(r, 40));   // dimensions du nouveau flux
       layout(); $('off').hidden = true; hist = [];
       running = true; $('start').textContent = 'Arrêter'; loop();
     } catch (e) { $('off').hidden = false; $('off').textContent = 'Erreur : ' + (e.message || e); $('start').textContent = 'Démarrer la caméra'; }
@@ -302,9 +302,11 @@
   }
   function stop() {
     running = false; if (stream) stream.getTracks().forEach(t => t.stop());
+    $('video').srcObject = null; prevE = null;   // l'ancien format ne doit pas rester pour le prochain démarrage
     $('over').getContext('2d').clearRect(0, 0, 9999, 9999);
     $('off').hidden = false; $('off').textContent = 'Caméra arrêtée.'; $('start').textContent = 'Démarrer la caméra';
   }
+  $('video').onresize = () => { if (running && $('video').videoWidth) layout(); };   // le format du flux a changé (rotation, nouvelle caméra)
   $('start').onclick = () => (running ? stop() : start());
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
 
