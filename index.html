@@ -34,6 +34,20 @@
   .dbg { font-family: monospace; font-size: 12px; opacity: .85; margin: 4px 2px 6px; min-height: 2.6em; white-space: pre-line; }
   .thr { display: flex; align-items: center; gap: 10px; font-size: 13px; opacity: .9; margin: 4px 2px 10px; }
   .thr input { flex: 1; }
+  body.analysis .score, body.analysis #deck, body.analysis .count-only { display: none; }
+  body:not(.analysis) #analysis { display: none; }
+  .tabs { display: flex; gap: 8px; margin: 12px 0 0; }
+  .tabs button { flex: 1; padding: 10px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 700; background: rgba(255,255,255,.15); color: #fff; }
+  .tabs button.on { background: var(--accent); color: #222; }
+  #analysis h3 { font-size: 14px; margin: 14px 2px 6px; opacity: .9; }
+  .stats { background: rgba(0,0,0,.25); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }
+  table.agg { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.agg th, table.agg td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.12); }
+  table.agg td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .ent { display: flex; gap: 10px; background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
+  .ent img { width: 96px; height: auto; border-radius: 8px; flex: none; align-self: flex-start; }
+  .ent .nm { font-weight: 700; font-size: 15px; }
+  .ent .near { opacity: .7; }
   .suit { margin-top: 14px; }
   .suit h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; }
   .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -56,6 +70,8 @@
     </div>
   </div>
 
+  <div class="tabs"><button id="tabCount" class="on">Compteur</button><button id="tabAn">Analyse</button></div>
+
   <div class="cam" id="cam">
     <video id="video" playsinline muted></video>
     <canvas id="over"></canvas>
@@ -69,11 +85,23 @@
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
   </div>
-  <div class="actions">
+  <div class="actions count-only">
     <button class="act alt" id="undo">↩︎ Annuler</button>
     <button class="act alt" id="reset">Nouvelle donne</button>
   </div>
-  <p class="hint">Chaque carte est comptée une seule fois par donne, dès qu'elle est lue de façon stable. Touchez une carte ci-dessous pour corriger à la main.</p>
+  <p class="hint count-only">Chaque carte est comptée une seule fois par donne, dès qu'elle est lue de façon stable. Touchez une carte ci-dessous pour corriger à la main.</p>
+
+  <section id="analysis">
+    <div class="actions">
+      <button class="act" id="freeze">⏸ Figer</button>
+      <button class="act alt" id="copyRep">Copier le rapport</button>
+      <button class="act alt" id="clearAn">Vider</button>
+    </div>
+    <p class="hint">Tout ce que la caméra voit est mémorisé ici (même après rechargement). Les valeurs en direct sont lissées sur 1,5 s.</p>
+    <h3>Session</h3><div class="stats" id="stats"></div>
+    <h3>Par carte</h3><table class="agg" id="aggT"></table>
+    <h3>Détections (la plus récente en haut)</h3><div id="entries"></div>
+  </section>
 
   <div id="deck"></div>
   <p class="hint" style="text-align:center;margin-top:20px">Compteur Manille · <b id="version"></b> · <span id="engine">modèle non chargé</span></p>
@@ -198,9 +226,89 @@
       x.fillStyle = '#111'; x.fillText(label, d.x0 * sx + 5, d.y0 * sy - 6);
     }
   }
+  // ---------- Analyse : mémorisation de ce que voit le modèle ----------
+  const AN_KEY = 'manille-analyse-v1', MAX_ENT = 60;
+  let an = load(AN_KEY, { frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
+  let anDirty = false, paused = false, lastRender = 0, lastDbg = 0, win = [];
+  const cname = id => { const [su, r] = id.split('-'); return r + suitOf(id).sym; };
+  const topName = c => c === 32 ? 'carte 2-6' : c >= 0 ? cname(cardOfClass(c)) : '–';
+  const hhmmss = t => new Date(t).toLocaleTimeString('fr-FR');
+  setInterval(() => { if (anDirty) { store(AN_KEY, an); anDirty = false; } }, 2000);
+
+  function snap(v, dets) {   // vignette annotée de l'image analysée
+    const w = 240, h = Math.round(w * v.videoHeight / v.videoWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d'); x.drawImage(v, 0, 0, w, h); x.lineWidth = 2; x.strokeStyle = '#f2b705'; x.fillStyle = '#f2b705'; x.font = 'bold 13px sans-serif';
+    for (const d of dets) { x.strokeRect(d.x0 * w / SIZE, d.y0 * h / SIZE, (d.x1 - d.x0) * w / SIZE, (d.y1 - d.y0) * h / SIZE); x.fillText(cname(d.id) + ' ' + Math.round(d.s * 100), d.x0 * w / SIZE + 2, d.y0 * h / SIZE - 3); }
+    return c.toDataURL('image/jpeg', .6);
+  }
+  function record(v, dets, ms) {
+    const top = decode.top, now = Date.now();
+    an.frames++; an.msSum += ms; an.eng = $('engine').textContent;
+    if (top.s > an.top.s) an.top = { s: top.s, id: topName(top.c) };
+    for (const d of dets) {
+      const a = an.agg[d.id] || (an.agg[d.id] = { n: 0, sum: 0, max: 0, last: 0 });
+      a.n++; a.sum += d.s; a.max = Math.max(a.max, d.s); a.last = now;
+    }
+    if (dets.length) an.hit++;
+    // une entrée par « apparition » : tant que les mêmes cartes restent visibles, on garde la meilleure image
+    const key = dets.length ? dets.map(d => d.id).sort().join(',') : (top.s >= .1 ? 'near:' + top.c : '');
+    if (key) {
+      const best = dets.length ? Math.max(...dets.map(d => d.s)) : top.s, cur = an.entries[0];
+      if (cur && cur.key === key && now - cur.t < 4000) {
+        cur.t = now; cur.n++;
+        if (best > cur.best + .05) { cur.best = best; cur.ids = dets.map(d => ({ id: d.id, s: +d.s.toFixed(2) })); cur.thumb = snap(v, dets); }
+      } else {
+        an.entries.unshift({ key, t: now, n: 1, best, ms: Math.round(ms), near: dets.length ? null : { c: top.c, s: +top.s.toFixed(2) },
+          ids: dets.map(d => ({ id: d.id, s: +d.s.toFixed(2) })), thumb: snap(v, dets) });
+        if (an.entries.length > MAX_ENT) an.entries.length = MAX_ENT;
+      }
+    }
+    anDirty = true;
+  }
+  function renderAnalysis() {
+    const f = an.frames;
+    $('stats').innerHTML = `${f} images analysées · ${f ? Math.round(an.hit / f * 100) : 0} % avec une carte détectée · ${f ? Math.round(an.msSum / f) : 0} ms par image<br>`
+      + `Meilleur score brut de la session : <b>${Math.round(an.top.s * 100)} %</b> (${an.top.id || '–'})<br>${an.eng || ''}`;
+    const rows = Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max);
+    $('aggT').innerHTML = rows.length ? '<tr><th>Carte</th><th class="n">Vue</th><th class="n">Max</th><th class="n">Moy.</th></tr>'
+      + rows.map(([id, a]) => `<tr><td>${cname(id)}</td><td class="n">${a.n}×</td><td class="n">${Math.round(a.max * 100)} %</td><td class="n">${Math.round(a.sum / a.n * 100)} %</td></tr>`).join('')
+      : '<tr><td>Aucune carte détectée pour l\'instant.</td></tr>';
+    $('entries').innerHTML = an.entries.map(e => `<div class="ent"><img src="${e.thumb}" alt=""><div>`
+      + (e.near ? `<div class="nm near">Presque : ${topName(e.near.c)} ${Math.round(e.near.s * 100)} %</div><div class="near">sous le seuil, non compté</div>`
+        : `<div class="nm">${e.ids.map(d => cname(d.id) + ' ' + Math.round(d.s * 100) + ' %').join(' · ')}</div><div>meilleur : ${Math.round(e.best * 100)} %</div>`)
+      + `<div class="near">${hhmmss(e.t)} · ${e.n} images</div></div></div>`).join('') || '<div class="hint">Rien mémorisé.</div>';
+  }
+  function report() {
+    const f = an.frames, L = [`Compteur Manille v${VERSION} · ${an.eng}`, `${f} images, ${f ? Math.round(an.hit / f * 100) : 0} % avec détection, ${f ? Math.round(an.msSum / f) : 0} ms/image`,
+      `Meilleur score brut : ${Math.round(an.top.s * 100)} % (${an.top.id})`, '', 'Par carte (vue, max, moyenne) :'];
+    Object.entries(an.agg).sort((a, b) => b[1].max - a[1].max).forEach(([id, a]) => L.push(`  ${cname(id)} : ${a.n}×, ${Math.round(a.max * 100)} %, ${Math.round(a.sum / a.n * 100)} %`));
+    L.push('', 'Détections (récentes d\'abord) :');
+    an.entries.forEach(e => L.push(`  ${hhmmss(e.t)} ` + (e.near ? `presque ${topName(e.near.c)} ${Math.round(e.near.s * 100)} %` : e.ids.map(d => cname(d.id) + ' ' + Math.round(d.s * 100) + ' %').join(', ')) + ` (${e.n} images)`));
+    return L.join('\n');
+  }
+  $('tabCount').onclick = () => setTab(false); $('tabAn').onclick = () => setTab(true);
+  function setTab(on) { document.body.classList.toggle('analysis', on); $('tabAn').classList.toggle('on', on); $('tabCount').classList.toggle('on', !on); if (on) renderAnalysis(); }
+  $('freeze').onclick = () => { paused = !paused; $('freeze').textContent = paused ? '▶ Reprendre' : '⏸ Figer'; };
+  $('clearAn').onclick = () => { if (confirm('Effacer toute l\'analyse mémorisée ?')) { an = { frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' }; store(AN_KEY, an); renderAnalysis(); } };
+  $('copyRep').onclick = async () => {
+    const t = report();
+    try { await navigator.clipboard.writeText(t); $('copyRep').textContent = 'Copié ✓'; }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); $('copyRep').textContent = 'Copié ✓'; } catch (e2) { prompt('Copiez le rapport :', t); } ta.remove(); }
+    setTimeout(() => { $('copyRep').textContent = 'Copier le rapport'; }, 1500);
+  };
+  // affichage en direct lissé : meilleur score de chaque carte sur les 1,5 dernières secondes
+  function liveText(dets, ms) {
+    const t = Date.now(); win.push({ t, dets, top: decode.top }); while (win.length && t - win[0].t > 1500) win.shift();
+    const m = {}; let top = { s: 0, c: -1 };
+    win.forEach(w => { w.dets.forEach(d => { if (!m[d.id] || d.s > m[d.id]) m[d.id] = d.s; }); if (w.top.s > top.s) top = w.top; });
+    const ids = Object.entries(m).sort((a, b) => b[1] - a[1]).map(([id, sc]) => `${cname(id)} ${Math.round(sc * 100)} %`);
+    return (ids.length ? ids.join(' · ') : 'aucune carte détectée') + `\nmeilleur score (1,5 s) : ${Math.round(top.s * 100)} % (${topName(top.c)}) · ${Math.round(ms)} ms`;
+  }
+
   async function loop() {
     while (running) {
       const v = $('video');
+      if (paused) { await new Promise(r => setTimeout(r, 100)); continue; }
       if (v.readyState >= 2 && v.videoWidth) {
         const t0 = performance.now();
         let dets = [];
@@ -210,8 +318,12 @@
         const now = {}; dets.forEach(d => { now[d.id] = (seen[d.id] || 0) + 1; });
         seen = now;
         for (const id of Object.keys(now)) if (now[id] >= STABLE && !taken.includes(id)) { taken.push(id); render(); flash(id); }
-        $('debug').textContent = (dets.length ? dets.map(d => `${d.id.replace('-', ' ')} ${Math.round(d.s * 100)}%`).join(' · ') : 'aucune carte détectée')
-          + `\nmeilleur score : ${Math.round(decode.top.s * 100)} % (${decode.top.c === 32 ? 'carte 2-6' : decode.top.c >= 0 ? cardOfClass(decode.top.c) : '-'}) · ${Math.round(performance.now() - t0)} ms`;
+        const ms = performance.now() - t0;
+        record(v, dets, ms);
+        const tn = Date.now();
+        const txt = liveText(dets, ms);
+        if (tn - lastDbg > 400) { $('debug').textContent = txt; lastDbg = tn; }
+        if (document.body.classList.contains('analysis') && tn - lastRender > 1000) { renderAnalysis(); lastRender = tn; }
       }
       await new Promise(r => setTimeout(r, 10));
     }
@@ -243,7 +355,7 @@
   $('start').onclick = () => (running ? stop() : start());
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
 
-  const VERSION = 9;   // à incrémenter à chaque mise en ligne
+  const VERSION = 10;   // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
