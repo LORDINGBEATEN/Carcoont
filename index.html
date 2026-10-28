@@ -46,7 +46,10 @@
   .lc:active { transform: scale(.92); }
   .learn .actions { margin: 6px 0 0; }
   .learn .actions .act { padding: 12px 6px; font-size: 15px; }
-  #micBtn.on { background: #c62828; color: #fff; }
+  .lc.sel { outline: 3px solid #fff; background: #fff3c4; }
+  .lc.ok { background: #2e9e5b; color: #fff; }
+  .lc.ok.red { color: #ffd6d6; }
+  .lc.ok::after { color: #fff; }
   .lc.hit { outline: 3px solid #fff; }
   /* mode apprentissage : caméra fixée en haut, grille juste dessous, le reste masqué */
   body.learning .score, body.learning .dbg, body.learning .main-actions, body.learning #deck, body.learning .ver { display: none; }
@@ -98,8 +101,7 @@
   <div class="learn" id="learn" hidden>
     <div class="hint" id="learnMsg" style="margin:0"></div>
     <div class="lgrid" id="lgrid"></div>
-    <div class="actions"><button class="act alt" id="micBtn">🎤 Micro</button>
-      <button class="act alt" id="clearTpl">Tout oublier</button>
+    <div class="actions"><button class="act alt" id="clearTpl">Tout oublier</button>
       <button class="act" id="doneLearn">Terminé</button></div>
   </div>
 
@@ -206,9 +208,12 @@
   let buf = [];
   function smooth(a) {
     if (a.none) { buf = []; return a; }
+    // autre carte que la précédente : on repart de zéro plutôt que de mélanger les deux
+    const prev = buf[buf.length - 1], changed = !!prev && (prev.red !== a.red || dist(prev.rf, a.rf) > .15 || dist(prev.sf, a.sf) > .15);
+    if (changed) buf = [];
     buf.push(a); if (buf.length > 3) buf.shift();
     const same = buf.filter(x => x.red === a.red), avg = k => a[k].map((_, i) => same.reduce((s, x) => s + x[k][i], 0) / same.length);
-    return { ...a, rf: avg('rf'), sf: avg('sf') };
+    return { ...a, rf: avg('rf'), sf: avg('sf'), changed };
   }
 
   function analyze(cv) {
@@ -296,10 +301,10 @@
       if (v.readyState >= 2 && v.videoWidth) {
         cropFromVideo();
         const raw = analyze(card); drawDebug(raw.dbg); const a = smooth(raw); last = a;
-        let id = null, msg = 'pas de carte';
-        if (!a.none) { const r = recognize(a); id = r.id || null; msg = r.msg; }
+        let id = null, msg = 'pas de carte', r = null;
+        if (!a.none) { r = recognize(a); id = r.id || null; msg = r.msg; }
         $('debug').textContent = msg; $('badge').textContent = id ? id.replace('-', ' ') : msg.split(':')[0];
-        step(id);
+        if (learning()) learnTick(a, r); else step(id);
       }
       await new Promise(r => setTimeout(r, 90));
     }
@@ -338,73 +343,75 @@
   $('start').onclick = () => (running ? stop() : start());
 
   // ---------- Apprentissage ----------
-  // tpl.c : cartes déjà enregistrées (pour afficher les coches)
-  if (!tpl.c) tpl.c = [];
+  // 1) on touche la carte qu'on va montrer  2) l'appli la mémorise dès qu'elle la voit nette
+  // 3) on retire puis on remontre la carte : si elle est reconnue, la case passe au vert
+  if (!tpl.c) tpl.c = [];   // cartes mémorisées
+  if (!tpl.v) tpl.v = [];   // cartes mémorisées ET reconnues
   const learning = () => document.body.classList.contains('learning');
+  let target = null, phase = 'capture', stableN = 0, absentN = 0, recN = 0, recId = null, seenAbsent = false, failN = 0;
+
   function renderLearn() {
     $('lgrid').innerHTML = SUITS.map(su => VALUES.map(v => {
       const id = `${su.id}-${v.l}`, n = tpl.c.filter(x => x === id).length;
-      return `<button class="lc${su.red ? ' red' : ''}${n ? ' done' : ''}" data-id="${id}" data-n="${n || ''}">${v.l}<small>${su.sym}</small></button>`;
+      return `<button class="lc${su.red ? ' red' : ''}${n ? ' done' : ''}${tpl.v.includes(id) ? ' ok' : ''}${target === id ? ' sel' : ''}" data-id="${id}" data-n="${n || ''}">${v.l}<small>${su.sym}</small></button>`;
     }).join('')).join('');
-    const miss = [...VALUES.filter(v => !tpl.r.some(t => t.l === v.l)).map(v => v.l), ...SUITS.filter(s => !tpl.s.some(t => t.l === s.id)).map(s => s.sym)];
-    if (!$('learnMsg').dataset.keep) $('learnMsg').textContent = miss.length
-      ? 'Visez une carte dans le cadre, puis touchez-la ci-dessous. Il manque : ' + miss.join(' ')
-      : 'Tout est appris ✓ Ajoutez des exemples si besoin, puis « Terminé ».';
+    if (!$('learnMsg').dataset.keep) $('learnMsg').textContent = target && phase === 'verify' ? 'Mémorisée. Retirez la carte, puis remontrez-la pour vérifier.'
+      : target ? 'Montrez maintenant cette carte dans le cadre.'
+      : tpl.v.length === 32 ? 'Tout est reconnu ✓ Touchez « Terminé ».'
+      : 'Touchez la carte que vous allez montrer. Vert = mémorisée et reconnue.';
   }
-  function say(msg) {
+  function say(msg, ms = 2200) {
     const m = $('learnMsg'); m.textContent = msg; m.dataset.keep = '1';
-    clearTimeout(say.t); say.t = setTimeout(() => { delete m.dataset.keep; renderLearn(); }, 1800);
+    clearTimeout(say.t); say.t = setTimeout(() => { delete m.dataset.keep; renderLearn(); }, ms);
   }
   async function setLearning(on) {
     if (on && !running) await start();
     document.body.classList.toggle('learning', on); $('learn').hidden = !on;
     if (running) layoutGuide();
-    if (on) { renderLearn(); window.scrollTo(0, 0); startVoice(); } else stopVoice();
+    target = null; phase = 'capture';
+    if (on) { renderLearn(); window.scrollTo(0, 0); }
   }
   $('learnBtn').onclick = () => setLearning(!learning());
   $('doneLearn').onclick = () => setLearning(false);
-  $('lgrid').onclick = e => { const b = e.target.closest('.lc'); if (b) { const [su, r] = b.dataset.id.split('-'); enroll(r, su); } };
-  // ---- Commande vocale : dire « roi de pique » enregistre la carte vue par la caméra ----
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const RANK_WORDS = [['10', /\b(dix|10)\b/], ['A', /\b(as|a|1)\b/], ['R', /\b(roi|rois|roy|roua)\b/], ['D', /\b(dame|dames)\b/],
-    ['V', /\b(valet|valets|valais)\b/], ['9', /\b(neuf|9)\b/], ['8', /\b(huit|8)\b/], ['7', /\b(sept|set|cette|7)\b/]];
-  const SUIT_WORDS = [['coeur', /(coeur|keur|queur)/], ['carreau', /(carreau|carot|carro)/], ['pique', /\bpi(que|k|c)/], ['trefle', /(trefle|treffle)/]];
-  function parseCard(text) {
-    const t = text.toLowerCase().replace(/œ/g, 'oe').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const r = RANK_WORDS.find(([, re]) => re.test(t)), su = SUIT_WORDS.find(([, re]) => re.test(t));
-    return r && su ? { rank: r[0], suit: su[0] } : null;
-  }
-  let rec = null, wantVoice = false;
-  function setMic(on) { $('micBtn').classList.toggle('on', on); $('micBtn').textContent = on ? '🎤 J\'écoute' : '🎤 Micro'; }
-  function startVoice() {
-    if (!SR) { say('Micro non disponible sur ce navigateur : touchez les cartes dans la grille.'); $('micBtn').hidden = true; return; }
-    wantVoice = true; if (rec) return;
-    rec = new SR(); rec.lang = 'fr-FR'; rec.continuous = true; rec.interimResults = false;
-    rec.onstart = () => setMic(true);
-    rec.onresult = e => {
-      const text = e.results[e.results.length - 1][0].transcript, c = parseCard(text);
-      if (c) { enroll(c.rank, c.suit, true); } else say('Entendu « ' + text.trim() + ' » : dites par ex. « roi de pique ».');
-    };
-    rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantVoice = false; say('Micro refusé : autorisez-le ou touchez la grille.'); } };
-    rec.onend = () => { rec = null; setMic(false); if (wantVoice && learning()) setTimeout(startVoice, 300); };   // le navigateur coupe l'écoute : on relance
-    try { rec.start(); } catch (e) { rec = null; }
-  }
-  function stopVoice() { wantVoice = false; if (rec) rec.stop(); setMic(false); }
-  $('micBtn').onclick = () => (wantVoice ? stopVoice() : startVoice());
+  $('lgrid').onclick = e => {
+    const b = e.target.closest('.lc'); if (!b) return;
+    target = target === b.dataset.id ? null : b.dataset.id; phase = 'capture'; recN = 0; stableN = 0;
+    renderLearn();
+  };
 
-  function enroll(rank, suit, fromVoice) {   // un seul geste : toucher ou dire la carte vue par la caméra
-    if (!last || last.none) return say('Aucune carte lue : placez-la dans le cadre.');
-    if (isRed(suit) !== last.red) return say('Cette couleur ne correspond pas au rouge/noir vu par la caméra.');
-    tpl.r.push({ l: rank, f: last.rf }); tpl.s.push({ l: suit, f: last.sf }); tpl.c.push(`${suit}-${rank}`);
-    store('manille-tpl-v1', tpl);
-    if (navigator.vibrate) navigator.vibrate(30);
-    renderLearn(); say('Enregistré : ' + rank + suitOf(suit + '-x').sym);
-    const cell = document.querySelector(`.lc[data-id="${suit}-${rank}"]`);
-    if (cell) { cell.classList.add('hit'); setTimeout(() => cell.classList.remove('hit'), 700); }
+  // appelé à chaque image en mode apprentissage ; rec = résultat de recognize() (ou null)
+  function learnTick(a, rec) {
+    if (a.none) { stableN = 0; recN = 0; if (++absentN >= 3) seenAbsent = true; return; }
+    absentN = 0; stableN = a.changed ? 1 : stableN + 1;
+    if (target && phase === 'capture') {                                  // mémorisation dès que la carte est stable
+      if (stableN < 4) return;
+      const [suit, rank] = target.split('-');
+      if (isRed(suit) !== a.red) { if (stableN % 15 === 4) say('Cette carte n\'a pas la bonne couleur (rouge/noir).'); return; }
+      tpl.r.push({ l: rank, f: a.rf }); tpl.s.push({ l: suit, f: a.sf }); tpl.c.push(target);
+      tpl.v = tpl.v.filter(x => x !== target);                            // à revérifier avec ce nouvel exemple
+      store('manille-tpl-v1', tpl);
+      phase = 'verify'; seenAbsent = false; recN = 0; failN = 0;
+      if (navigator.vibrate) navigator.vibrate(30);
+      renderLearn(); return;
+    }
+    if (!rec || !rec.id) { recN = 0; if (phase === 'verify' && seenAbsent && ++failN === 30) { failN = 0; say('Pas reconnue : replacez la carte bien droite, ou touchez-la à nouveau pour ajouter un exemple.', 3500); } return; }
+    recN = rec.id === recId ? recN + 1 : 1; recId = rec.id;
+    if (recN < 3) return;
+    if (phase === 'verify' && !seenAbsent) return;                        // la carte qu'on vient de mémoriser doit d'abord être retirée
+    const ok = rec.id;
+    if (tpl.c.includes(ok) && !tpl.v.includes(ok)) {
+      tpl.v.push(ok); store('manille-tpl-v1', tpl);
+      if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+      if (ok === target) { target = null; phase = 'capture'; }
+      renderLearn(); say('Reconnue ✓ ' + ok.split('-')[1] + suitOf(ok).sym, 1500);
+    }
   }
-  $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [], c: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
+  $('clearTpl').onclick = () => {
+    if (!confirm('Oublier tout l\'apprentissage ?')) return;
+    tpl = { r: [], s: [], c: [], v: [] }; target = null; phase = 'capture'; store('manille-tpl-v1', tpl); renderLearn();
+  };
 
-  const VERSION = 6;  // à incrémenter à chaque mise en ligne
+  const VERSION = 7;  // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
