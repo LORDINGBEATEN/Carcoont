@@ -34,7 +34,15 @@
   .thr { display: flex; align-items: center; gap: 10px; font-size: 13px; opacity: .9; margin: 4px 2px 10px; }
   .thr input { flex: 1; }
   /* modes */
-  body:not([data-mode=an]) #analysis, body:not([data-mode=learn]) #learn { display: none; }
+  body:not([data-mode=an]) #analysis, body:not([data-mode=learn]) #learn, body:not([data-mode=pli]) #pli { display: none; }
+  body[data-mode=pli] .cam, body[data-mode=pli] #debug, body[data-mode=pli] .cam-only, body[data-mode=pli] .thr { display: none; }
+  #pli canvas { width: 100%; border-radius: 12px; touch-action: manipulation; display: block; }
+  .pr { display: flex; gap: 10px; align-items: center; background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; margin-top: 8px; }
+  .pr img { width: 54px; height: 54px; object-fit: contain; background: #fff; border-radius: 6px; flex: none; }
+  .pr .ch { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+  .pr button { border: 0; border-radius: 10px; padding: 8px 10px; font-size: 15px; font-weight: 700; background: rgba(255,255,255,.18); color: #fff; }
+  .pr button.on { background: var(--accent); color: #222; }
+  .pr select { font-size: 14px; padding: 6px; border-radius: 8px; }
   body[data-mode=an] .score, body[data-mode=an] #deck, body[data-mode=an] .count-only,
   body[data-mode=learn] .score, body[data-mode=learn] #deck, body[data-mode=learn] .count-only { display: none; }
   body[data-mode=learn] .cam { position: sticky; top: 6px; z-index: 10; margin-top: 6px; }
@@ -86,7 +94,7 @@
     </div>
   </div>
 
-  <div class="tabs"><button id="tabCount" class="on">Compteur</button><button id="tabLearn">Apprentissage</button><button id="tabAn">Analyse</button></div>
+  <div class="tabs"><button id="tabCount" class="on">Compteur</button><button id="tabLearn">Apprentissage</button><button id="tabAn">Analyse</button><button id="tabPli">Pli</button></div>
 
   <div class="cam" id="cam">
     <video id="video" playsinline muted></video>
@@ -102,6 +110,16 @@
     <button class="act alt fond" id="fondBtn">1) Fond : filmez la table sans carte</button>
     <div class="lgrid" id="lgrid"></div>
     <div class="actions"><button class="act alt" id="clearTpl">Tout oublier</button><button class="act" id="doneLearn">Terminé</button></div>
+  </section>
+
+  <section id="pli">
+    <div class="actions"><button class="act" id="pliBtn">📷 Photographier le pli</button><button class="act alt" id="pliUndo">↩︎ Dernier point</button></div>
+    <input type="file" id="pliFile" accept="image/*" hidden>
+    <p class="hint" id="pliMsg">Prenez une photo du pli, puis touchez le coin (rang + couleur) de chaque carte visible. Le cadre jaune doit entourer ce coin : réglez sa taille avec le curseur.</p>
+    <label class="thr">Largeur d'une carte <input type="range" id="pliW" min="12" max="60" value="30"><b id="pliWv">30 %</b></label>
+    <canvas id="pliCv" hidden></canvas>
+    <div id="pliRes"></div>
+    <div class="actions"><button class="act" id="pliAdd" disabled>Ajouter au compteur</button></div>
   </section>
 
   <section id="analysis">
@@ -125,7 +143,7 @@
   <label id="hap" style="position:fixed;left:-100px;top:-100px;opacity:0;pointer-events:none"><input type="checkbox" switch tabindex="-1"></label>
   <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="20" max="95" value="55"><b id="thrv">55 %</b></label>
   <label class="thr">Écart avec le 2e choix <input type="range" id="mar" min="0" max="40" value="4"><b id="marv">4 pts</b></label>
-  <div class="actions">
+  <div class="actions cam-only">
     <button class="act" id="start">Démarrer la caméra</button>
   </div>
   <div class="actions count-only">
@@ -151,7 +169,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 24;   // à incrémenter à chaque mise en ligne
+  const VERSION = 25;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -220,9 +238,9 @@
     return { vw, vh, gw, gh, sx: (vw - gw) / 2, sy: (vh - gh) / 2 };
   }
   const CORNER = { w: .34, h: .30 };   // coin haut-gauche du cadre
-  function fill(ctx, k) {
+  function fill(ctx, k, buf = inBuf) {
     const px = ctx.getImageData(0, 0, IN, IN).data, n = IN * IN, o = k * 3 * n;
-    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) inBuf[o + c * n + i] = (px[i * 4 + c] / 255 - MEAN[c]) / STD[c];
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) buf[o + c * n + i] = (px[i * 4 + c] / 255 - MEAN[c]) / STD[c];
   }
   const unit = a => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; s = Math.sqrt(s) || 1; for (let i = 0; i < a.length; i++) a[i] /= s; return a; };
   async function embed(v) {
@@ -377,8 +395,9 @@
 
   async function setMode(m) {
     if (m === 'learn' && !running) await start();
+    if (m === 'pli' && running) stop();
     mode = m; document.body.dataset.mode = m;
-    ['Count', 'Learn', 'An'].forEach(k => $('tab' + k).classList.toggle('on', k.toLowerCase() === m));
+    ['Count', 'Learn', 'An', 'Pli'].forEach(k => $('tab' + k).classList.toggle('on', k.toLowerCase() === m));
     target = null; phase = 'idle'; hist = [];
     if (running) layout();
     if (m === 'learn') { renderLearn(); window.scrollTo(0, 0); }
@@ -386,7 +405,7 @@
   }
   try { $('beep').checked = localStorage.getItem('manille-beep') !== '0'; } catch (e) {}
   $('beep').onchange = () => { try { localStorage.setItem('manille-beep', $('beep').checked ? '1' : '0'); } catch (e) {} };
-  $('tabCount').onclick = () => setMode('count'); $('tabLearn').onclick = () => setMode('learn'); $('tabAn').onclick = () => setMode('an');
+  $('tabCount').onclick = () => setMode('count'); $('tabLearn').onclick = () => setMode('learn'); $('tabAn').onclick = () => setMode('an'); $('tabPli').onclick = () => setMode('pli');
   $('doneLearn').onclick = () => setMode('count');
 
   // ---------- Apprentissage ----------
@@ -454,6 +473,92 @@
       renderLearn(); say('Reconnue ✓ ' + cname(p.l), 1500);
     }
   }
+
+  // ---------- Pli : photo de plusieurs cartes qui se chevauchent ----------
+  // Seuls les coins (rang + couleur) sont visibles : on touche chaque coin sur la photo, l'application en prend l'empreinte
+  // (plusieurs tailles et inclinaisons, on garde la meilleure) et la compare aux empreintes de coin apprises.
+  let pliImg = null, pliPts = [], pliTok = 0;
+  const PLI_K = [.85, 1, 1.18], PLI_A = [-20, -10, 0, 10, 20], CARD_R = 1.4;
+  const ALL_IDS = SUITS.flatMap(su => VALUES.map(v => `${su.id}-${v.l}`));
+  const pliW = () => $('pliW').value / 100 * pliImg.width;
+  function cornerScores(b) {   // ressemblance de ce coin avec chaque carte apprise
+    const cb = center(b, mu.b), by = {};
+    for (const s of S) if (s.l !== 'fond') (by[s.l] || (by[s.l] = [])).push(dot(cb, s.cb));
+    return Object.entries(by).map(([l, v]) => { v.sort((x, y) => y - x); const k = v.slice(0, 3); return [l, k.reduce((x, y) => x + y, 0) / k.length]; }).sort((x, y) => y[1] - x[1]);
+  }
+  function drawPli() {
+    const cv = $('pliCv'), x = cv.getContext('2d'), W = pliW(), u = cv.width / 640;
+    x.drawImage(pliImg, 0, 0); x.lineWidth = 3 * u; x.font = `bold ${22 * u}px sans-serif`;
+    pliPts.forEach((p, i) => {
+      const w = W * CORNER.w, h = W * CARD_R * CORNER.h;
+      x.strokeStyle = '#f2b705'; x.strokeRect(p.x - w / 2, p.y - h / 2, w, h);
+      x.fillStyle = '#f2b705'; x.fillRect(p.x - w / 2, p.y - h / 2 - 26 * u, 28 * u, 26 * u);
+      x.fillStyle = '#111'; x.fillText(i + 1, p.x - w / 2 + 6 * u, p.y - h / 2 - 5 * u);
+    });
+  }
+  async function analysePli() {
+    const tok = ++pliTok;
+    if (!pliImg || !pliPts.length) { renderPli(); return; }
+    if (!S.some(x => x.l !== 'fond')) { $('pliMsg').textContent = 'Aucune carte apprise : faites d\'abord l\'apprentissage.'; return; }
+    await loadModel();
+    const W = pliW(), V = [];
+    for (const k of PLI_K) for (const a of PLI_A) V.push([k, a]);
+    const buf = new Float32Array(V.length * 3 * IN * IN), cx = cx1, src = pliImg;
+    for (const p of pliPts) {
+      V.forEach(([k, a], j) => {
+        const cw = W * k * CORNER.w, ch = W * k * CARD_R * CORNER.h;
+        cx.save(); cx.fillStyle = '#fff'; cx.fillRect(0, 0, IN, IN); cx.translate(IN / 2, IN / 2); cx.scale(IN / cw, IN / ch);
+        cx.rotate(-a * Math.PI / 180); cx.translate(-p.x, -p.y); cx.drawImage(src, 0, 0); cx.restore(); fill(cx, j, buf);
+      });
+      const out = (await session.run({ input: new ort.Tensor('float32', buf, [V.length, 3, IN, IN]) }))[session.outputNames[0]].data;
+      if (tok !== pliTok) return;
+      let best = null;
+      V.forEach((_, j) => { const r = cornerScores(unit(Float32Array.from(out.subarray(j * 1280, (j + 1) * 1280)))); if (!best || r[0][1] > best.r[0][1]) best = { r, j }; });
+      const [k, a] = V[best.j], cw = W * k * CORNER.w, ch = W * k * CARD_R * CORNER.h;   // vignette de la meilleure variante
+      cx.save(); cx.fillStyle = '#fff'; cx.fillRect(0, 0, IN, IN); cx.translate(IN / 2, IN / 2); cx.scale(IN / cw, IN / ch); cx.rotate(-a * Math.PI / 180); cx.translate(-p.x, -p.y); cx.drawImage(src, 0, 0); cx.restore();
+      const t = document.createElement('canvas'); t.width = t.height = 112; t.getContext('2d').drawImage(cx.canvas, 0, 0, 112, 112);
+      p.res = best.r.slice(0, 3); p.thumb = t.toDataURL('image/jpeg', .7); p.pick = best.r[0][0];
+    }
+    drawPli(); renderPli();
+  }
+  function renderPli() {
+    $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch">`
+      + p.res.map(([l, s]) => `<button data-l="${l}" class="${p.pick === l ? 'on' : ''}">${cname(l)} <small>${Math.round(s * 100)}</small></button>`).join('')
+      + `<select><option value="">autre…</option>${ALL_IDS.map(id => `<option value="${id}"${p.pick === id && !p.res.some(r => r[0] === id) ? ' selected' : ''}>${cname(id)}</option>`).join('')}</select></div></div>`).join('');
+    const ids = pliPts.map(p => p.pick).filter(Boolean);
+    $('pliAdd').disabled = !ids.length; $('pliAdd').textContent = ids.length ? `Ajouter ${ids.length} carte${ids.length > 1 ? 's' : ''} au compteur` : 'Ajouter au compteur';
+  }
+  $('pliBtn').onclick = () => { unlockAudio(); $('pliFile').click(); };
+  $('pliFile').onchange = async () => {
+    const f = $('pliFile').files[0]; if (!f) return;
+    const url = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {   // photo réduite à 1600 px (l'orientation EXIF est appliquée par le navigateur)
+      const r = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight)), w = Math.round(im.naturalWidth * r), h = Math.round(im.naturalHeight * r);
+      pliImg = document.createElement('canvas'); pliImg.width = w; pliImg.height = h; pliImg.getContext('2d').drawImage(im, 0, 0, w, h); URL.revokeObjectURL(url);
+      const cv = $('pliCv'); cv.width = w; cv.height = h; cv.hidden = false; pliPts = []; drawPli(); renderPli();
+      $('pliMsg').textContent = 'Touchez le coin (rang + couleur) de chaque carte visible.';
+    };
+    im.src = url; $('pliFile').value = '';
+  };
+  $('pliCv').onclick = e => {
+    if (!pliImg) return;
+    const cv = $('pliCv'), r = cv.getBoundingClientRect();
+    pliPts.push({ x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height });
+    drawPli(); $('pliMsg').textContent = 'Analyse…'; analysePli().then(() => { $('pliMsg').textContent = 'Touchez une proposition pour la corriger, ou un autre coin pour l\'ajouter.'; });
+  };
+  $('pliUndo').onclick = () => { pliPts.pop(); if (pliImg) drawPli(); analysePli(); };
+  $('pliW').oninput = () => { $('pliWv').textContent = $('pliW').value + ' %'; if (pliImg) { drawPli(); clearTimeout(pliW.t); pliW.t = setTimeout(analysePli, 300); } };
+  $('pliRes').onclick = e => {
+    const row = e.target.closest('.pr'), b = e.target.closest('button'); if (!row || !b) return;
+    pliPts[row.dataset.i].pick = b.dataset.l; renderPli();
+  };
+  $('pliRes').onchange = e => { const row = e.target.closest('.pr'); if (row && e.target.value) { pliPts[row.dataset.i].pick = e.target.value; renderPli(); } };
+  $('pliAdd').onclick = () => {
+    const ids = [...new Set(pliPts.map(p => p.pick).filter(Boolean))], dup = ids.filter(id => taken.includes(id));
+    ids.forEach(id => { if (!taken.includes(id)) taken.push(id); }); render();
+    $('pliMsg').textContent = `${ids.length - dup.length} carte(s) ajoutée(s)` + (dup.length ? ` · déjà comptées : ${dup.map(cname).join(' ')}` : '') + '. Prenez le pli suivant.';
+    pliPts = []; drawPli(); renderPli();
+  };
 
   // ---------- Analyse : mémorisation de ce que voit l'application ----------
   const AN_KEY = 'manille-analyse-v3', MAX_ENT = 60, fresh = () => ({ frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
