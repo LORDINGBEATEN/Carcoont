@@ -121,6 +121,8 @@
     <h3>Reconnaissances (la plus récente en haut)</h3><div id="entries"></div>
   </section>
 
+  <label class="thr"><input type="checkbox" id="beep" checked style="flex:none"> Bip sonore à chaque carte détectée</label>
+  <label id="hap" style="position:fixed;left:-100px;top:-100px;opacity:0;pointer-events:none"><input type="checkbox" switch tabindex="-1"></label>
   <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="20" max="95" value="55"><b id="thrv">55 %</b></label>
   <label class="thr">Écart avec le 2e choix <input type="range" id="mar" min="0" max="40" value="4"><b id="marv">4 pts</b></label>
   <div class="actions">
@@ -149,7 +151,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 22;   // à incrémenter à chaque mise en ligne
+  const VERSION = 23;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -182,11 +184,25 @@
   }
   $('undo').onclick = () => { taken.pop(); render(); };
   $('reset').onclick = () => { if (!taken.length || confirm('Effacer la donne en cours ?')) { taken = []; hist = []; render(); } };
+  // Retour à chaque carte : vibration (Android) ; sur iPhone le navigateur n'a pas d'API de vibration, on tente le retour
+  // haptique d'un interrupteur système et on ajoute un petit bip, réglable.
+  let actx = null;
+  function unlockAudio() {   // le son n'est permis qu'après un geste de l'utilisateur
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {}
+  }
+  function feedback() {
+    if (navigator.vibrate) navigator.vibrate(30);
+    else try { $('hap').click(); } catch (e) {}
+    if ($('beep').checked && actx) {
+      const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = 880; g.gain.value = .15;
+      o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + .12);
+    }
+  }
   function flash(id) {
     const f = $('flash'), s = suitOf(id);
     f.textContent = cname(id); f.style.color = s.red ? '#c62828' : '#222'; f.classList.add('on');
     const el = document.querySelector(`.card[data-id="${id}"]`); el.classList.add('hit');
-    if (navigator.vibrate) navigator.vibrate(30);
+    feedback();
     setTimeout(() => { f.classList.remove('on'); el.classList.remove('hit'); }, 500);
   }
 
@@ -355,7 +371,7 @@
     $('off').hidden = false; $('off').textContent = 'Caméra arrêtée.'; $('start').textContent = 'Démarrer la caméra';
   }
   $('video').onresize = () => { if (running && $('video').videoWidth) layout(); };   // le format du flux a changé (rotation, nouvelle caméra)
-  $('start').onclick = () => (running ? stop() : start());
+  $('start').onclick = () => { unlockAudio(); running ? stop() : start(); };
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
   $('mar').oninput = () => { $('marv').textContent = $('mar').value + ' pts'; };
 
@@ -368,6 +384,8 @@
     if (m === 'learn') { renderLearn(); window.scrollTo(0, 0); }
     if (m === 'an') renderAnalysis();
   }
+  try { $('beep').checked = localStorage.getItem('manille-beep') !== '0'; } catch (e) {}
+  $('beep').onchange = () => { try { localStorage.setItem('manille-beep', $('beep').checked ? '1' : '0'); } catch (e) {} };
   $('tabCount').onclick = () => setMode('count'); $('tabLearn').onclick = () => setMode('learn'); $('tabAn').onclick = () => setMode('an');
   $('doneLearn').onclick = () => setMode('count');
 
@@ -397,7 +415,7 @@
     const m = $('learnMsg'); m.textContent = msg; m.dataset.keep = '1';
     clearTimeout(say.t); say.t = setTimeout(() => { delete m.dataset.keep; renderLearn(); }, ms);
   }
-  const buzz = p => { if (navigator.vibrate) navigator.vibrate(p); };
+  const buzz = () => feedback();
   function pick(id) {
     if (id !== 'fond' && nOf('fond') < NEED) return say('Enregistrez d\'abord le « Fond » (table sans carte).');
     target = target === id ? null : id; got = 0; stableN = 0; recN = 0; lastCap = 0;
