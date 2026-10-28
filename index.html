@@ -120,7 +120,8 @@
     <h3>Reconnaissances (la plus récente en haut)</h3><div id="entries"></div>
   </section>
 
-  <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="50" max="99" value="90"><b id="thrv">90 %</b></label>
+  <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="20" max="95" value="55"><b id="thrv">55 %</b></label>
+  <label class="thr">Écart avec le 2e choix <input type="range" id="mar" min="0" max="40" value="10"><b id="marv">10 pts</b></label>
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
   </div>
@@ -147,7 +148,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 15;   // à incrémenter à chaque mise en ligne
+  const VERSION = 16;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -223,15 +224,28 @@
     $('engine').textContent = 'moteur : processeur';
   }
   const dot = (x, y) => { let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * y[i]; return s; };
-  const sim = (e, s) => .5 * (dot(e.a, s.a) + dot(e.b, s.b));
+  const sim = (e, s) => .5 * (dot(e.a, s.a) + dot(e.b, s.b));   // ressemblance brute (utilisée pour « carte immobile » et « fond »)
+  // Toutes les cartes se ressemblent beaucoup pour le réseau (papier blanc, même taille). On retire donc l'empreinte moyenne des
+  // cartes apprises avant de comparer : les écarts entre cartes (donc les marges) deviennent bien plus nets.
+  let mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
+  const center = (v, m) => { const o = new Float32Array(v.length); for (let i = 0; i < v.length; i++) o[i] = v[i] - m[i]; return unit(o); };
+  function refit() {
+    const cards = S.filter(x => x.l !== 'fond');
+    mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
+    for (const x of cards) for (let i = 0; i < 1280; i++) { mu.a[i] += x.a[i] / cards.length; mu.b[i] += x.b[i] / cards.length; }
+    for (const x of S) { x.ca = center(x.a, mu.a); x.cb = center(x.b, mu.b); }
+  }
   function predict(e) {   // meilleure ressemblance par étiquette, du plus au moins ressemblant
-    const best = {};
-    for (const s of S) { const v = sim(e, s); if (!(s.l in best) || v > best[s.l]) best[s.l] = v; }
+    const ca = center(e.a, mu.a), cb = center(e.b, mu.b), best = {}; let bg = null;
+    for (const s of S) {
+      const v = .5 * (dot(ca, s.ca) + dot(cb, s.cb)); if (!(s.l in best) || v > best[s.l]) best[s.l] = v;
+      if (s.l === 'fond') { const r = sim(e, s); if (bg === null || r > bg) bg = r; }
+    }
     const r = Object.entries(best).sort((x, y) => y[1] - x[1]);
-    return r.length ? { l: r[0][0], s: r[0][1], m: r[1] ? r[0][1] - r[1][1] : 1, l2: r[1] ? r[1][0] : null, s2: r[1] ? r[1][1] : 0, bg: best.fond ?? null } : null;
+    return r.length ? { l: r[0][0], s: r[0][1], m: r[1] ? r[0][1] - r[1][1] : 1, l2: r[1] ? r[1][0] : null, s2: r[1] ? r[1][1] : 0, bg } : null;
   }
   const thr = () => $('thr').value / 100;
-  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= .02;   // assez ressemblante et nettement devant la 2e
+  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= $('mar').value / 100;   // assez ressemblante et nettement devant la 2e
   const STILL = .95;   // une image ne compte que si elle ressemble à la précédente : on ignore les images pendant qu'on change de carte
   let prevE = null;
 
@@ -243,7 +257,7 @@
     add(x) { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').add(x); } catch (e) {} },
     clear() { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').clear(); } catch (e) {} },
   };
-  const addSample = (l, e) => { const x = { l, a: e.a, b: e.b }; S.push(x); db.add(x); };
+  const addSample = (l, e) => { S.push({ l, a: e.a, b: e.b }); db.add({ l, a: e.a, b: e.b }); refit(); };
   const nOf = l => S.filter(x => x.l === l).length;
 
   // ---------- Caméra ----------
@@ -309,6 +323,7 @@
   $('video').onresize = () => { if (running && $('video').videoWidth) layout(); };   // le format du flux a changé (rotation, nouvelle caméra)
   $('start').onclick = () => (running ? stop() : start());
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
+  $('mar').oninput = () => { $('marv').textContent = $('mar').value + ' pts'; };
 
   async function setMode(m) {
     if (m === 'learn' && !running) await start();
@@ -353,7 +368,7 @@
     if (id !== 'fond' && nOf('fond') < NEED) return say('Enregistrez d\'abord le « Fond » (table sans carte).');
     target = target === id ? null : id; got = 0; stableN = 0; recN = 0; lastCap = 0;
     if (target && nOf(target)) {   // refaire une carte : on remplace ses anciens exemples
-      S = S.filter(x => x.l !== target); db.clear(); S.forEach(x => db.add(x)); verified = verified.filter(x => x !== target); store('manille-ver-v1', verified);
+      S = S.filter(x => x.l !== target); db.clear(); S.forEach(x => db.add({ l: x.l, a: x.a, b: x.b })); refit(); verified = verified.filter(x => x !== target); store('manille-ver-v1', verified);
     }
     phase = target ? 'collect' : 'idle'; renderLearn();
   }
@@ -361,7 +376,7 @@
   $('fondBtn').onclick = () => pick('fond');
   $('clearTpl').onclick = () => {
     if (!confirm('Oublier tout l\'apprentissage ?')) return;
-    S = []; db.clear(); verified = []; store('manille-ver-v1', verified); target = null; phase = 'idle'; renderLearn();
+    S = []; db.clear(); refit(); verified = []; store('manille-ver-v1', verified); target = null; phase = 'idle'; renderLearn();
   };
   function learnTick(e, p, ok, still) {
     const now = performance.now(), present = p && p.bg !== null ? p.bg < BG_SIM : false;
@@ -389,7 +404,7 @@
   }
 
   // ---------- Analyse : mémorisation de ce que voit l'application ----------
-  const AN_KEY = 'manille-analyse-v2', MAX_ENT = 60, fresh = () => ({ frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
+  const AN_KEY = 'manille-analyse-v3', MAX_ENT = 60, fresh = () => ({ frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' });
   let an = load(AN_KEY, fresh()), anDirty = false, lastRender = 0, lastDbg = 0, win = [];
   const hhmmss = t => new Date(t).toLocaleTimeString('fr-FR');
   setInterval(() => { if (anDirty) { store(AN_KEY, an); anDirty = false; } }, 2000);
@@ -399,7 +414,7 @@
     c.getContext('2d').drawImage(v, g.sx, g.sy, g.gw, g.gh, 0, 0, w, h); return c.toDataURL('image/jpeg', .6);
   }
   function record(v, p, ok, ms) {
-    const now = Date.now(); an.frames++; an.msSum += ms; an.eng = $('engine').textContent + ' · seuil ' + $('thr').value + ' %';
+    const now = Date.now(); an.frames++; an.msSum += ms; an.eng = $('engine').textContent + ' · seuil ' + $('thr').value + ' % · écart ' + $('mar').value + ' pts';
     if (!p) return;
     if (p.l !== 'fond' && p.s > an.top.s) an.top = { s: p.s, id: cname(p.l) };
     if (ok) { an.hit++; const a = an.agg[p.l] || (an.agg[p.l] = { n: 0, sum: 0, max: 0 }); a.n++; a.sum += p.s; a.max = Math.max(a.max, p.s); }
@@ -460,7 +475,7 @@
   $('freeze').onclick = () => { paused = !paused; $('freeze').textContent = paused ? '▶ Reprendre' : '⏸ Figer'; };
   $('clearAn').onclick = () => { if (confirm('Effacer toute l\'analyse mémorisée ?')) { an = fresh(); store(AN_KEY, an); renderAnalysis(); } };
 
-  (async () => { await db.open(); S = await db.all(); })();
+  (async () => { await db.open(); S = await db.all(); refit(); })();
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
