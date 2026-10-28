@@ -44,6 +44,7 @@
   table.agg { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.agg th, table.agg td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.12); }
   table.agg td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  #repText { width: 100%; height: 38vh; border-radius: 12px; border: 0; padding: 10px; font: 12px/1.4 monospace; user-select: text; -webkit-user-select: text; margin-bottom: 8px; }
   .ent { display: flex; gap: 10px; background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
   .ent img { width: 96px; height: auto; border-radius: 8px; flex: none; align-self: flex-start; }
   .ent .nm { font-weight: 700; font-size: 15px; }
@@ -97,6 +98,11 @@
       <button class="act alt" id="copyRep">Copier le rapport</button>
       <button class="act alt" id="clearAn">Vider</button>
     </div>
+    <div class="actions">
+      <button class="act alt" id="shareRep">Partager…</button>
+      <button class="act alt" id="showRep">Afficher le texte</button>
+    </div>
+    <textarea id="repText" readonly hidden></textarea>
     <p class="hint">Tout ce que la caméra voit est mémorisé ici (même après rechargement). Les valeurs en direct sont lissées sur 1,5 s.</p>
     <h3>Session</h3><div class="stats" id="stats"></div>
     <h3>Par carte</h3><table class="agg" id="aggT"></table>
@@ -290,6 +296,15 @@
   function setTab(on) { document.body.classList.toggle('analysis', on); $('tabAn').classList.toggle('on', on); $('tabCount').classList.toggle('on', !on); if (on) renderAnalysis(); }
   $('freeze').onclick = () => { paused = !paused; $('freeze').textContent = paused ? '▶ Reprendre' : '⏸ Figer'; };
   $('clearAn').onclick = () => { if (confirm('Effacer toute l\'analyse mémorisée ?')) { an = { frames: 0, hit: 0, msSum: 0, top: { s: 0, id: '' }, agg: {}, entries: [], eng: '' }; store(AN_KEY, an); renderAnalysis(); } };
+  $('showRep').onclick = () => {   // texte sélectionnable : appui long > Tout sélectionner > Copier
+    const t = $('repText'); t.hidden = !t.hidden; $('showRep').textContent = t.hidden ? 'Afficher le texte' : 'Masquer le texte';
+    if (!t.hidden) { t.value = report(); t.focus(); t.select(); t.setSelectionRange(0, t.value.length); }
+  };
+  $('shareRep').onclick = async () => {   // feuille de partage du téléphone (Messages, Mail, Notes…)
+    const text = report();
+    if (!navigator.share) { $('showRep').click(); return; }
+    try { await navigator.share({ title: 'Analyse Compteur Manille', text }); } catch (e) { /* annulé */ }
+  };
   $('copyRep').onclick = async () => {
     const t = report();
     try { await navigator.clipboard.writeText(t); $('copyRep').textContent = 'Copié ✓'; }
@@ -355,7 +370,7 @@
   $('start').onclick = () => (running ? stop() : start());
   $('thr').oninput = () => { $('thrv').textContent = $('thr').value + ' %'; };
 
-  const VERSION = 10;   // à incrémenter à chaque mise en ligne
+  const VERSION = 11;   // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
