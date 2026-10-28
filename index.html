@@ -45,6 +45,9 @@
   .lc.done::after { content: attr(data-n); position: absolute; top: 1px; right: 4px; font-size: 10px; color: #4a3a00; }
   .lc:active { transform: scale(.92); }
   .learn .actions { margin: 6px 0 0; }
+  .learn .actions .act { padding: 12px 6px; font-size: 15px; }
+  #micBtn.on { background: #c62828; color: #fff; }
+  .lc.hit { outline: 3px solid #fff; }
   /* mode apprentissage : caméra fixée en haut, grille juste dessous, le reste masqué */
   body.learning .score, body.learning .dbg, body.learning .main-actions, body.learning #deck, body.learning .ver { display: none; }
   body.learning { padding-top: 6px; }
@@ -95,7 +98,8 @@
   <div class="learn" id="learn" hidden>
     <div class="hint" id="learnMsg" style="margin:0"></div>
     <div class="lgrid" id="lgrid"></div>
-    <div class="actions"><button class="act alt" id="clearTpl">Tout oublier</button>
+    <div class="actions"><button class="act alt" id="micBtn">🎤 Micro</button>
+      <button class="act alt" id="clearTpl">Tout oublier</button>
       <button class="act" id="doneLearn">Terminé</button></div>
   </div>
 
@@ -355,22 +359,52 @@
     if (on && !running) await start();
     document.body.classList.toggle('learning', on); $('learn').hidden = !on;
     if (running) layoutGuide();
-    if (on) { renderLearn(); window.scrollTo(0, 0); }
+    if (on) { renderLearn(); window.scrollTo(0, 0); startVoice(); } else stopVoice();
   }
   $('learnBtn').onclick = () => setLearning(!learning());
   $('doneLearn').onclick = () => setLearning(false);
   $('lgrid').onclick = e => { const b = e.target.closest('.lc'); if (b) { const [su, r] = b.dataset.id.split('-'); enroll(r, su); } };
-  function enroll(rank, suit) {   // un seul geste : toucher la carte vue par la caméra
+  // ---- Commande vocale : dire « roi de pique » enregistre la carte vue par la caméra ----
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const RANK_WORDS = [['10', /\b(dix|10)\b/], ['A', /\b(as|a|1)\b/], ['R', /\b(roi|rois|roy|roua)\b/], ['D', /\b(dame|dames)\b/],
+    ['V', /\b(valet|valets|valais)\b/], ['9', /\b(neuf|9)\b/], ['8', /\b(huit|8)\b/], ['7', /\b(sept|set|cette|7)\b/]];
+  const SUIT_WORDS = [['coeur', /(coeur|keur|queur)/], ['carreau', /(carreau|carot|carro)/], ['pique', /\bpi(que|k|c)/], ['trefle', /(trefle|treffle)/]];
+  function parseCard(text) {
+    const t = text.toLowerCase().replace(/œ/g, 'oe').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const r = RANK_WORDS.find(([, re]) => re.test(t)), su = SUIT_WORDS.find(([, re]) => re.test(t));
+    return r && su ? { rank: r[0], suit: su[0] } : null;
+  }
+  let rec = null, wantVoice = false;
+  function setMic(on) { $('micBtn').classList.toggle('on', on); $('micBtn').textContent = on ? '🎤 J\'écoute' : '🎤 Micro'; }
+  function startVoice() {
+    if (!SR) { say('Micro non disponible sur ce navigateur : touchez les cartes dans la grille.'); $('micBtn').hidden = true; return; }
+    wantVoice = true; if (rec) return;
+    rec = new SR(); rec.lang = 'fr-FR'; rec.continuous = true; rec.interimResults = false;
+    rec.onstart = () => setMic(true);
+    rec.onresult = e => {
+      const text = e.results[e.results.length - 1][0].transcript, c = parseCard(text);
+      if (c) { enroll(c.rank, c.suit, true); } else say('Entendu « ' + text.trim() + ' » : dites par ex. « roi de pique ».');
+    };
+    rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantVoice = false; say('Micro refusé : autorisez-le ou touchez la grille.'); } };
+    rec.onend = () => { rec = null; setMic(false); if (wantVoice && learning()) setTimeout(startVoice, 300); };   // le navigateur coupe l'écoute : on relance
+    try { rec.start(); } catch (e) { rec = null; }
+  }
+  function stopVoice() { wantVoice = false; if (rec) rec.stop(); setMic(false); }
+  $('micBtn').onclick = () => (wantVoice ? stopVoice() : startVoice());
+
+  function enroll(rank, suit, fromVoice) {   // un seul geste : toucher ou dire la carte vue par la caméra
     if (!last || last.none) return say('Aucune carte lue : placez-la dans le cadre.');
     if (isRed(suit) !== last.red) return say('Cette couleur ne correspond pas au rouge/noir vu par la caméra.');
     tpl.r.push({ l: rank, f: last.rf }); tpl.s.push({ l: suit, f: last.sf }); tpl.c.push(`${suit}-${rank}`);
     store('manille-tpl-v1', tpl);
     if (navigator.vibrate) navigator.vibrate(30);
     renderLearn(); say('Enregistré : ' + rank + suitOf(suit + '-x').sym);
+    const cell = document.querySelector(`.lc[data-id="${suit}-${rank}"]`);
+    if (cell) { cell.classList.add('hit'); setTimeout(() => cell.classList.remove('hit'), 700); }
   }
   $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [], c: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
 
-  const VERSION = 5;  // à incrémenter à chaque mise en ligne
+  const VERSION = 6;  // à incrémenter à chaque mise en ligne
   $('version').textContent = 'v' + VERSION;
   render();
 </script>
