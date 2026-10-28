@@ -120,7 +120,7 @@
     <h3>Reconnaissances (la plus récente en haut)</h3><div id="entries"></div>
   </section>
 
-  <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="50" max="99" value="80"><b id="thrv">80 %</b></label>
+  <label class="thr">Seuil de ressemblance <input type="range" id="thr" min="50" max="99" value="90"><b id="thrv">90 %</b></label>
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
   </div>
@@ -147,7 +147,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 13;   // à incrémenter à chaque mise en ligne
+  const VERSION = 14;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -231,7 +231,9 @@
     return r.length ? { l: r[0][0], s: r[0][1], m: r[1] ? r[0][1] - r[1][1] : 1, l2: r[1] ? r[1][0] : null, s2: r[1] ? r[1][1] : 0, bg: best.fond ?? null } : null;
   }
   const thr = () => $('thr').value / 100;
-  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= .015;
+  const isOk = p => !!p && p.l !== 'fond' && p.s >= thr() && p.m >= .02;   // assez ressemblante et nettement devant la 2e
+  const STILL = .95;   // une image ne compte que si elle ressemble à la précédente : on ignore les images pendant qu'on change de carte
+  let prevE = null;
 
   // exemples conservés sur l'appareil (IndexedDB)
   const db = {
@@ -271,11 +273,12 @@
         let e;
         try { e = await embed(v); } catch (er) { $('debug').textContent = 'Erreur : ' + er.message; await new Promise(r => setTimeout(r, 500)); continue; }
         const p = predict(e), ok = isOk(p), ms = performance.now() - t0;
+        const still = !!prevE && sim(e, prevE) >= STILL; prevE = e;
         drawOverlay(v, p, ok);
         record(v, p, ok, ms);
-        if (mode === 'learn') learnTick(e, p, ok);
+        if (mode === 'learn') learnTick(e, p, ok && still, still);
         else {   // vote : une carte est comptée quand elle est reconnue sur au moins 3 des 6 dernières images
-          hist.push(ok ? p.l : null); if (hist.length > 6) hist.shift();
+          hist.push(ok && still ? p.l : null); if (hist.length > 6) hist.shift();
           for (const id of new Set(hist)) if (id && !taken.includes(id) && hist.filter(h => h === id).length >= 3) { taken.push(id); render(); flash(id); }
         }
         const tn = Date.now(), txt = liveText(p, ms);
@@ -347,6 +350,9 @@
   function pick(id) {
     if (id !== 'fond' && nOf('fond') < NEED) return say('Enregistrez d\'abord le « Fond » (table sans carte).');
     target = target === id ? null : id; got = 0; stableN = 0; recN = 0; lastCap = 0;
+    if (target && nOf(target)) {   // refaire une carte : on remplace ses anciens exemples
+      S = S.filter(x => x.l !== target); db.clear(); S.forEach(x => db.add(x)); verified = verified.filter(x => x !== target); store('manille-ver-v1', verified);
+    }
     phase = target ? 'collect' : 'idle'; renderLearn();
   }
   $('lgrid').onclick = e => { const b = e.target.closest('.lc'); if (b) pick(b.dataset.id); };
@@ -355,14 +361,14 @@
     if (!confirm('Oublier tout l\'apprentissage ?')) return;
     S = []; db.clear(); verified = []; store('manille-ver-v1', verified); target = null; phase = 'idle'; renderLearn();
   };
-  function learnTick(e, p, ok) {
+  function learnTick(e, p, ok, still) {
     const now = performance.now(), present = p && p.bg !== null ? p.bg < BG_SIM : false;
     if (target === 'fond') {                                       // le fond : on prend des images sans carte
-      if (now - lastCap > 250) { addSample('fond', e); lastCap = now; got++; if (got >= NEED) { target = null; phase = 'idle'; buzz(30); say('Fond enregistré ✓'); } renderLearn(); }
+      if (now - lastCap > 250 && still) { addSample('fond', e); lastCap = now; got++; if (got >= NEED) { target = null; phase = 'idle'; buzz(30); say('Fond enregistré ✓'); } renderLearn(); }
       return;
     }
     if (target && phase === 'collect') {                           // la carte : 12 exemples dès qu'elle est bien visible
-      if (!present) { stableN = 0; return; }
+      if (!present || !still) { stableN = 0; return; }             // pas d'exemple flou ni pendant qu'on place la carte
       if (++stableN < 3 || now - lastCap < 250) return;
       addSample(target, e); lastCap = now; got++;
       if (got >= NEED) { phase = 'verify'; seenAbsent = false; recN = 0; failN = 0; absentN = 0; buzz(30); }
