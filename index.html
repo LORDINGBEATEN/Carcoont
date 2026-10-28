@@ -148,7 +148,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 18;   // à incrémenter à chaque mise en ligne
+  const VERSION = 19;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -280,12 +280,20 @@
       x.fillStyle = ok ? '#fff' : '#111'; x.fillText(label, g.sx + 7 * u, g.sy + g.gh + 22 * u);
     }
   }
+  function freshVideo() {   // nouvel élément <video> à chaque démarrage : évite qu'un état résiduel du précédent (taille, rotation) déforme l'image
+    const old = $('video'), v = document.createElement('video');
+    v.id = 'video'; v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true;
+    v.onresize = () => { if (running && v.videoWidth) layout(); };
+    old.replaceWith(v); return v;
+  }
+  let actual = '', nFrames = 0;   // dimensions réelles de l'image reçue (pour le diagnostic)
   let loopId = 0;   // une seule boucle d'analyse à la fois, même si on redémarre vite la caméra
   async function loop(id) {
     while (running && id === loopId) {
       const v = $('video');
       if (paused) { await new Promise(r => setTimeout(r, 100)); continue; }
       if (v.readyState >= 2 && v.videoWidth) {
+        if (++nFrames % 25 === 1 && window.createImageBitmap) createImageBitmap(v).then(b => { actual = b.width + 'x' + b.height; b.close(); }).catch(() => {});
         if (v.videoWidth + 'x' + v.videoHeight !== dims) layout();   // le flux a changé de format : on recalcule l'affichage
         const t0 = performance.now();
         let e;
@@ -315,7 +323,7 @@
     try {
       await loadModel();
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false });
-      const v = $('video'); v.srcObject = stream; await v.play();
+      const v = freshVideo(); v.srcObject = stream; await v.play();
       for (let i = 0; i < 50 && !(v.videoWidth && v.videoHeight); i++) await new Promise(r => setTimeout(r, 40));   // dimensions du nouveau flux
       layout(); $('off').hidden = true; hist = [];
       running = true; $('start').textContent = 'Arrêter'; loop(++loopId);
@@ -463,7 +471,7 @@
     win.forEach(w => { if (!w.p) return; const q = w.p; if (q.l !== 'fond' && (!(q.l in m) || q.s > m[q.l])) m[q.l] = q.s; if (q.bg !== null) bg = bg === null ? q.bg : Math.min(bg, q.bg); });
     const r = Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id, sc]) => `${cname(id)} ${Math.round(sc * 100)} %`);
     return (S.length ? (r.length ? r.join(' · ') : 'rien de ressemblant') : 'aucun exemple : allez dans Apprentissage')
-      + `\nressemblance au fond : ${bg === null ? '–' : Math.round(bg * 100) + ' %'} (carte présente si < ${Math.round(BG_SIM * 100)} %)\n${Math.round(ms)} ms par image · vidéo ${dims} · cadre ${$('cam').offsetWidth}x${$('cam').offsetHeight}`;
+      + `\nressemblance au fond : ${bg === null ? '–' : Math.round(bg * 100) + ' %'} (carte présente si < ${Math.round(BG_SIM * 100)} %)\n${Math.round(ms)} ms par image · vidéo ${dims} · image ${actual || '?'} · cadre ${$('cam').offsetWidth}x${$('cam').offsetHeight}`;
   }
   $('showRep').onclick = () => {   // texte sélectionnable : appui long > Tout sélectionner > Copier
     const t = $('repText'); t.hidden = !t.hidden; $('showRep').textContent = t.hidden ? 'Afficher le texte' : 'Masquer le texte';
