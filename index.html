@@ -4,9 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Compteur Manille</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <style>
-  :root { --bg: #0f5132; --panel: #fffdf6; --ink: #1c1c1c; --accent: #f2b705; --muted: #8a8a7a; }
+  :root { --bg: #0f5132; --panel: #fffdf6; --ink: #1c1c1c; --red: #c62828; --accent: #f2b705; --muted: #8a8a7a; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; background: var(--bg); color: #fff; font-family: -apple-system, system-ui, sans-serif;
     min-height: 100vh; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); user-select: none; }
@@ -17,30 +16,43 @@
   .score .big small { font-size: 20px; font-weight: 500; opacity: .7; }
   .score .side { text-align: right; font-size: 14px; opacity: .9; line-height: 1.5; }
   .score .side b { font-size: 18px; }
-  .cam { position: relative; margin: 12px 0; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 4/3; }
-  .cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam { position: relative; margin: 12px auto; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 4/3; width: 100%; }
+  .cam video { width: 100%; height: 100%; object-fit: fill; display: block; }
+  .cam .guide { position: absolute; border: 3px dashed rgba(255,255,255,.85); border-radius: 12px; pointer-events: none; }
+  .cam .guide::after { content: ''; position: absolute; left: 2%; top: 2%; width: 22%; height: 30%;
+    border: 2px solid var(--accent); border-radius: 6px; }
   .cam .off { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px;
-    font-size: 15px; opacity: .85; }
-  .cam .badge { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.6); border-radius: 10px;
+    font-size: 15px; opacity: .9; background: rgba(0,0,0,.5); }
+  .cam .badge { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.65); border-radius: 10px;
     padding: 6px 12px; font-size: 14px; }
   .cam .flash { position: absolute; right: 10px; top: 10px; background: var(--accent); color: #222; font-weight: 800;
-    font-size: 40px; width: 64px; height: 64px; border-radius: 14px; display: grid; place-items: center;
-    opacity: 0; transition: opacity .4s; }
+    font-size: 30px; padding: 8px 14px; border-radius: 14px; opacity: 0; transition: opacity .4s; }
   .cam .flash.on { opacity: 1; transition: none; }
   .actions { display: flex; gap: 8px; margin: 12px 0; }
   button.act { flex: 1; padding: 12px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600;
     background: var(--accent); color: #222; }
   button.act.alt { background: rgba(255,255,255,.18); color: #fff; }
   button.act:disabled { opacity: .4; }
-  .rank { display: flex; align-items: center; gap: 12px; background: var(--panel); color: var(--ink);
-    border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; }
-  .rank .l { font-size: 28px; font-weight: 800; width: 44px; }
-  .rank .n { flex: 1; font-size: 13px; color: var(--muted); }
-  .rank .n b { color: var(--ink); font-size: 16px; }
-  .rank button { width: 44px; height: 44px; border-radius: 10px; border: 0; background: #e9e6d8; font-size: 22px; font-weight: 700; }
-  .rank .c { width: 28px; text-align: center; font-size: 22px; font-weight: 800; }
-  .rank.hit { outline: 3px solid var(--accent); }
-  .hint { font-size: 13px; opacity: .75; margin: 6px 2px 10px; }
+  .hint { font-size: 13px; opacity: .8; margin: 6px 2px 10px; line-height: 1.4; }
+  .learn { background: rgba(0,0,0,.25); border-radius: 16px; padding: 12px; margin-bottom: 12px; }
+  .learn h3 { margin: 0 0 6px; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 18px; font-weight: 700; background: var(--panel); color: var(--ink); }
+  .chip.red { color: var(--red); }
+  .chip.sel { outline: 3px solid var(--accent); }
+  .chip small { font-size: 10px; display: block; color: var(--muted); font-weight: 600; }
+  .dbg { display: flex; gap: 10px; align-items: center; font-family: monospace; font-size: 12px; opacity: .85; margin: 4px 2px 10px; }
+  .dbg canvas { background: #000; width: 66px; height: 118px; border-radius: 4px; flex: none; }
+  .suit { margin-top: 14px; }
+  .suit h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .card { background: var(--panel); color: var(--ink); border-radius: 10px; border: 0; padding: 10px 0 6px;
+    font-size: 24px; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
+  .card.red { color: var(--red); }
+  .card .pts { font-size: 11px; font-weight: 600; color: var(--muted); }
+  .card.taken { background: var(--accent); }
+  .card.taken .pts { color: #4a3a00; }
+  .card.hit { outline: 3px solid #fff; }
 </style>
 </head>
 <body>
@@ -53,162 +65,239 @@
     </div>
   </div>
 
-  <div class="cam">
+  <div class="cam" id="cam">
     <video id="video" playsinline muted></video>
-    <div class="off" id="off">Touchez « Démarrer la caméra » puis faites défiler vos cartes,<br>coin chiffré bien visible, l'une après l'autre.</div>
+    <div class="guide" id="guide"></div>
+    <div class="off" id="off">Touchez « Démarrer la caméra ».<br>Placez chaque carte dans le cadre en pointillés,<br>coin chiffré dans le petit carré jaune.</div>
     <div class="badge" id="badge" hidden></div>
     <div class="flash" id="flash"></div>
   </div>
+  <div class="dbg"><canvas id="dbgc" width="66" height="118"></canvas><div id="debug">—</div></div>
 
-  <p class="hint" id="debug" style="font-family:monospace;min-height:1.4em"></p>
   <div class="actions">
     <button class="act" id="start">Démarrer la caméra</button>
-    <button class="act alt" id="undo">↩︎ Annuler</button>
-    <button class="act alt" id="reset">Raz</button>
+    <button class="act alt" id="learnBtn">Apprentissage</button>
   </div>
-  <p class="hint">Chaque carte est comptée quand son chiffre est lu 3 fois de suite. Retirez-la de l'image avant de montrer la suivante. Corrigez avec + / − si besoin.</p>
+  <div class="actions">
+    <button class="act alt" id="undo">↩︎ Annuler</button>
+    <button class="act alt" id="reset">Nouvelle donne</button>
+  </div>
 
-  <div id="ranks"></div>
+  <div class="learn" id="learn" hidden>
+    <h3>Apprentissage de votre jeu</h3>
+    <p class="hint">Placez une carte dans le cadre, choisissez son <b>rang</b> et sa <b>couleur</b>, puis « Enregistrer ». Huit cartes suffisent si elles couvrent les 8 rangs et les 4 couleurs (par ex. 10♥, As♦, Roi♠, Dame♣, Valet♥, 9♦, 8♠, 7♣). Ajouter d'autres exemples améliore la lecture.</p>
+    <div class="chips" id="rankChips"></div>
+    <div class="chips" id="suitChips"></div>
+    <div class="actions"><button class="act" id="saveTpl">Enregistrer cette carte</button>
+      <button class="act alt" id="clearTpl">Tout oublier</button></div>
+    <div class="hint" id="learnMsg"></div>
+  </div>
+
+  <div id="deck"></div>
 </main>
 
 <script>
-  // Manille : 10 = 5, As = 4, Roi = 3, Dame = 2, Valet = 1, le reste 0 (total 60). 4 cartes par rang.
-  const RANKS = [
-    { k: '10', name: '10 (manille)', p: 5 }, { k: 'A', name: 'As (manillon)', p: 4 },
-    { k: 'R', name: 'Roi', p: 3 }, { k: 'D', name: 'Dame', p: 2 }, { k: 'V', name: 'Valet', p: 1 },
-    { k: '9', name: '9', p: 0 }, { k: '8', name: '8', p: 0 }, { k: '7', name: '7', p: 0 },
+  const SUITS = [
+    { id: 'coeur', name: 'Cœurs', sym: '♥', red: true }, { id: 'carreau', name: 'Carreaux', sym: '♦', red: true },
+    { id: 'pique', name: 'Piques', sym: '♠', red: false }, { id: 'trefle', name: 'Trèfles', sym: '♣', red: false },
   ];
-  // lettres lues -> rang (jeux français R/D/V et internationaux K/Q/J)
-  const ALIAS = { '10': '10', '1O': '10', 'IO': '10', 'I0': '10', '1D': '10', A: 'A', R: 'R', K: 'R',
-                  D: 'D', Q: 'D', V: 'V', J: 'V', '9': '9', '8': '8', '7': '7' };
-  const KEY = 'manille-v2';
-  let log = [];                       // historique des rangs comptés (pour Annuler)
-  try { log = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
-  const nOf = k => log.filter(x => x === k).length;
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(log)); } catch (e) {} };
-
+  // Manille : 10 = 5, As = 4, Roi = 3, Dame = 2, Valet = 1, le reste 0 (total 60)
+  const VALUES = [{ l: '10', p: 5 }, { l: 'A', p: 4 }, { l: 'R', p: 3 }, { l: 'D', p: 2 }, { l: 'V', p: 1 }, { l: '9', p: 0 }, { l: '8', p: 0 }, { l: '7', p: 0 }];
   const $ = id => document.getElementById(id);
-  const box = $('ranks');
-  RANKS.forEach(r => {
-    const d = document.createElement('div');
-    d.className = 'rank'; d.id = 'r-' + r.k;
-    d.innerHTML = `<div class="l">${r.k}</div><div class="n">${r.name}<br><b>${r.p} pt${r.p > 1 ? 's' : ''}</b></div>
-      <button data-k="${r.k}" data-d="-1">−</button><div class="c" id="c-${r.k}"></div><button data-k="${r.k}" data-d="1">+</button>`;
-    box.appendChild(d);
-  });
-  box.onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    const k = b.dataset.k;
-    if (b.dataset.d === '1') { if (nOf(k) < 4) log.push(k); }
-    else { const i = log.lastIndexOf(k); if (i >= 0) log.splice(i, 1); }
-    render();
-  };
+  const ptsOf = id => VALUES.find(v => v.l === id.split('-')[1]).p;
+  const suitOf = id => SUITS.find(s => s.id === id.split('-')[0]);
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
+  let taken = load('manille-v3', []);          // cartes comptées, dans l'ordre
+  let tpl = load('manille-tpl-v1', { r: [], s: [] });   // exemples appris : {l: label, f: [...]}
+
+  // ---------- Affichage des 32 cartes ----------
+  SUITS.forEach(s => {
+    const sec = document.createElement('section'); sec.className = 'suit';
+    sec.innerHTML = `<h2><span>${s.sym} ${s.name}</span><span id="sub-${s.id}"></span></h2><div class="row"></div>`;
+    VALUES.forEach(v => {
+      const id = `${s.id}-${v.l}`, b = document.createElement('button');
+      b.className = 'card' + (s.red ? ' red' : ''); b.dataset.id = id;
+      b.innerHTML = `${v.l}<span>${s.sym}</span><span class="pts">${v.p} pt${v.p > 1 ? 's' : ''}</span>`;
+      b.onclick = () => { const i = taken.indexOf(id); i >= 0 ? taken.splice(i, 1) : taken.push(id); render(); };
+      sec.querySelector('.row').appendChild(b);
+    });
+    $('deck').appendChild(sec);
+  });
   function render() {
     let total = 0;
-    RANKS.forEach(r => { const n = nOf(r.k); total += n * r.p; $('c-' + r.k).textContent = n; });
-    $('total').textContent = total;
-    $('count').textContent = log.length;
-    $('opp').textContent = 60 - total;
-    $('undo').disabled = !log.length;
-    save();
+    document.querySelectorAll('.card').forEach(el => {
+      const on = taken.includes(el.dataset.id); el.classList.toggle('taken', on);
+      if (on) total += ptsOf(el.dataset.id);
+    });
+    SUITS.forEach(s => {
+      const sub = taken.filter(id => id.startsWith(s.id + '-')).reduce((a, id) => a + ptsOf(id), 0);
+      $('sub-' + s.id).textContent = sub ? sub + ' pts' : '';
+    });
+    $('total').textContent = total; $('count').textContent = taken.length; $('opp').textContent = 60 - total;
+    $('undo').disabled = !taken.length; store('manille-v3', taken);
   }
-  $('undo').onclick = () => { log.pop(); render(); };
-  $('reset').onclick = () => { if (!log.length || confirm('Effacer la donne en cours ?')) { log = []; render(); } };
+  $('undo').onclick = () => { taken.pop(); render(); };
+  $('reset').onclick = () => { if (!taken.length || confirm('Effacer la donne en cours ?')) { taken = []; render(); } };
 
-  // ---------- Caméra + lecture du coin des cartes ----------
-  const STABLE = 3;       // lectures identiques consécutives pour valider une carte
-  const GAP = 2;          // lectures « vides » nécessaires avant de pouvoir compter la carte suivante
-  let worker, stream, running = false;
-  let cand = null, candN = 0, empty = GAP, armed = true;
-  const work = document.createElement('canvas');
+  // ---------- Analyse d'une image de carte (300x420, carte alignée dans le cadre) ----------
+  const CW = 300, CH = 420, CX0 = 6, CX1 = 72, CY0 = 8, CY1 = 126;   // zone du coin chiffré
+  const GW = 16, GH = 24;                                             // taille des vignettes comparées
 
-  function readRank(words) {
-    // garde les mots courts reconnus comme rang, assez hauts et assez sûrs ; prend le plus gros
-    let best = null;
-    $('debug').textContent = words.length
-      ? words.map(w => `"${w.text}" ${Math.round(w.confidence)}% h${w.bbox.y1 - w.bbox.y0}`).slice(0, 8).join('  ')
-      : 'rien lu';
-    for (const w of words) {
-      const t = (w.text || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
-      const k = ALIAS[t];
-      if (!k || w.confidence < 35) continue;
-      const h = w.bbox.y1 - w.bbox.y0;
-      if (h < 18) continue;                    // trop petit : probablement du bruit
-      if (!best || h > best.h) best = { k, h };
+  function glyph(lum, ink, w, run, rgb) {
+    // boîte englobante de l'encre dans la bande de lignes [y0,y1], puis vignette GWxGH
+    let x0 = w, x1 = -1;
+    for (let y = run[0]; y <= run[1]; y++) for (let x = 0; x < w; x++) if (ink[y * w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+    if (x1 - x0 < 3) return null;
+    const bw = x1 - x0 + 1, bh = run[1] - run[0] + 1, f = new Array(GW * GH).fill(0);
+    let red = 0, n = 0;
+    for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+      const ya = run[0] + Math.floor(gy * bh / GH), yb = Math.max(ya + 1, run[0] + Math.floor((gy + 1) * bh / GH));
+      const xa = x0 + Math.floor(gx * bw / GW), xb = Math.max(xa + 1, x0 + Math.floor((gx + 1) * bw / GW));
+      let c = 0, t = 0;
+      for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) { t++; if (ink[y * w + x]) c++; }
+      f[gy * GW + gx] = +(c / t).toFixed(2);
     }
-    return best && best.k;
+    for (let y = run[0]; y <= run[1]; y++) for (let x = x0; x <= x1; x++) if (ink[y * w + x]) {
+      const i = (y * w + x) * 4; red += rgb[i] - (rgb[i + 1] + rgb[i + 2]) / 2; n++;
+    }
+    return { f, red: n ? red / n : 0, box: [x0, run[0], bw, bh] };
+  }
+
+  function analyze(cv) {
+    const w = CX1 - CX0, h = CY1 - CY0;
+    const rgb = cv.getContext('2d', { willReadFrequently: true }).getImageData(CX0, CY0, w, h).data;
+    const lum = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) lum[i] = rgb[i * 4] * .3 + rgb[i * 4 + 1] * .59 + rgb[i * 4 + 2] * .11;
+    const paper = Float32Array.from(lum).sort()[Math.floor(w * h * .8)];
+    const ink = new Uint8Array(w * h), thr = paper * .7;
+    for (let i = 0; i < w * h; i++) ink[i] = lum[i] < thr ? 1 : 0;
+    // bandes de lignes contenant de l'encre (écarts de 2 lignes tolérés)
+    const runs = []; let cur = null, gap = 0;
+    for (let y = 0; y < h; y++) {
+      let c = 0; for (let x = 0; x < w; x++) c += ink[y * w + x];
+      if (c >= 2) { if (!cur) cur = [y, y]; else cur[1] = y; gap = 0; }
+      else if (cur && ++gap > 2) { if (cur[1] - cur[0] >= 8) runs.push(cur); cur = null; gap = 0; }
+    }
+    if (cur && cur[1] - cur[0] >= 8) runs.push(cur);
+    const dbg = { ink, w, h, runs };
+    if (paper < 90 || runs.length < 2) return { dbg, none: true };
+    const r = glyph(lum, ink, w, runs[0], rgb), s = glyph(lum, ink, w, runs[1], rgb);
+    if (!r || !s) return { dbg, none: true };
+    return { dbg, rf: r.f, sf: s.f, red: s.red > 35 };
+  }
+
+  const dist = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]); return d / a.length; };
+  function nearest(f, list) {
+    let best = null;
+    for (const t of list) { const d = dist(f, t.f); if (!best || d < best.d) best = { l: t.l, d }; }
+    return best;
+  }
+  const isRed = l => l === 'coeur' || l === 'carreau';
+  const MAXD = 0.22;
+  function recognize(a) {
+    if (!tpl.r.length || !tpl.s.length) return { msg: 'apprentissage requis' };
+    const r = nearest(a.rf, tpl.r), s = nearest(a.sf, tpl.s.filter(t => isRed(t.l) === a.red));
+    if (!r || !s) return { msg: 'couleur inconnue' };
+    const msg = `rang ${r.l} (${r.d.toFixed(2)}) · ${s.l} (${s.d.toFixed(2)})`;
+    return r.d < MAXD && s.d < MAXD ? { id: `${s.l}-${r.l}`, msg } : { msg: 'incertain : ' + msg };
+  }
+
+  // ---------- Caméra ----------
+  const card = document.createElement('canvas'); card.width = CW; card.height = CH;
+  let stream, running = false, last = null;
+  let cand = null, candN = 0, empty = 2, armed = true;
+  const STABLE = 3, GAP = 2;
+
+  function cropFromVideo() {
+    const v = $('video'), vw = v.videoWidth, vh = v.videoHeight;
+    const gh = Math.min(vh * .9, vw * .95 * 7 / 5), gw = gh * 5 / 7, sx = (vw - gw) / 2, sy = (vh - gh) / 2;
+    card.getContext('2d', { willReadFrequently: true }).drawImage(v, sx, sy, gw, gh, 0, 0, CW, CH);
+    return { gw, gh, sx, sy, vw, vh };
+  }
+  function layoutGuide() {
+    const v = $('video'), vw = v.videoWidth, vh = v.videoHeight, g = $('guide');
+    const gh = Math.min(vh * .9, vw * .95 * 7 / 5), gw = gh * 5 / 7;
+    $('cam').style.width = `min(100%, ${55 * vw / vh}vh)`; $('cam').style.aspectRatio = vw + '/' + vh;
+    Object.assign(g.style, { left: ((vw - gw) / 2 / vw * 100) + '%', top: ((vh - gh) / 2 / vh * 100) + '%',
+      width: (gw / vw * 100) + '%', height: (gh / vh * 100) + '%' });
+  }
+  function drawDebug(d) {
+    const c = $('dbgc'), x = c.getContext('2d'), im = x.createImageData(d.w, d.h);
+    for (let i = 0; i < d.w * d.h; i++) { const v = d.ink[i] ? 255 : 30; im.data.set([v, v, v, 255], i * 4); }
+    x.putImageData(im, 0, 0);
   }
 
   async function loop() {
     while (running) {
       const v = $('video');
-      if (v.readyState >= 2) {
-        const W = 1000, H = Math.round(W * v.videoHeight / v.videoWidth);
-        work.width = W; work.height = H;
-        const ctx = work.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(v, 0, 0, W, H);
-        // noir et blanc : seuil moyen de l'image, pour isoler l'encre du carton
-        const img = ctx.getImageData(0, 0, W, H), px = img.data;
-        let sum = 0;
-        for (let i = 0; i < px.length; i += 4) sum += (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11);
-        const thr = sum / (px.length / 4) * 0.8;
-        for (let i = 0; i < px.length; i += 4) {
-          const g = px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11;
-          px[i] = px[i + 1] = px[i + 2] = g > thr ? 255 : 0;
-        }
-        ctx.putImageData(img, 0, 0);
-        let words = [];
-        try {
-          const { data } = await worker.recognize(work, {}, { blocks: true });
-          words = data.words || (data.blocks || []).flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words)));
-        } catch (e) {}
-        step(readRank(words));
+      if (v.readyState >= 2 && v.videoWidth) {
+        cropFromVideo();
+        const a = analyze(card); last = a; drawDebug(a.dbg);
+        let id = null, msg = 'pas de carte';
+        if (!a.none) { const r = recognize(a); id = r.id || null; msg = r.msg; }
+        $('debug').textContent = msg; $('badge').textContent = id ? id.replace('-', ' ') : msg.split(':')[0];
+        step(id);
       }
-      await new Promise(r => setTimeout(r, 30));
+      await new Promise(r => setTimeout(r, 90));
     }
   }
-
-  function step(k) {
-    $('badge').textContent = k ? 'Lu : ' + k : 'Aucune carte';
-    if (!k) { cand = null; candN = 0; if (++empty >= GAP) armed = true; return; }
+  function step(id) {
+    if (!id) { cand = null; candN = 0; if (++empty >= GAP) armed = true; return; }
     empty = 0;
-    if (k === cand) candN++; else { cand = k; candN = 1; armed = true; }   // un autre rang réarme
+    if (id === cand) candN++; else { cand = id; candN = 1; armed = true; }
     if (candN >= STABLE && armed) {
-      armed = false;                          // il faut retirer la carte (ou la changer) avant la suivante
-      if (nOf(k) < 4) { log.push(k); render(); flash(k); }
+      armed = false;
+      if (!taken.includes(id)) { taken.push(id); render(); flash(id); }
     }
   }
-
-  function flash(k) {
-    const f = $('flash'); f.textContent = k; f.classList.add('on');
-    const row = $('r-' + k); row.classList.add('hit');
+  function flash(id) {
+    const f = $('flash'), s = suitOf(id);
+    f.textContent = id.split('-')[1] + s.sym; f.style.color = s.red ? '#c62828' : '#222'; f.classList.add('on');
+    const el = document.querySelector(`.card[data-id="${id}"]`); el.classList.add('hit');
     if (navigator.vibrate) navigator.vibrate(30);
-    setTimeout(() => { f.classList.remove('on'); row.classList.remove('hit'); }, 500);
+    setTimeout(() => { f.classList.remove('on'); el.classList.remove('hit'); }, 500);
   }
-
   async function start() {
-    $('start').disabled = true; $('start').textContent = 'Chargement…';
+    $('start').disabled = true;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false });
-      $('video').srcObject = stream; await $('video').play();
-      worker = await Tesseract.createWorker('eng');
-      await worker.setParameters({ tessedit_char_whitelist: '10IOAKQJRDV987', tessedit_pageseg_mode: '6' });
-      $('off').hidden = true; $('badge').hidden = false;
-      running = true; $('start').disabled = false; $('start').textContent = 'Arrêter'; loop();
-    } catch (e) {
-      $('off').hidden = false;
-      $('off').textContent = 'Caméra indisponible : ' + (e.message || e) + '. Utilisez + / − en attendant.';
-      $('start').disabled = false; $('start').textContent = 'Démarrer la caméra';
-    }
+      const v = $('video'); v.srcObject = stream; await v.play();
+      if (!v.videoWidth) await new Promise(r => v.addEventListener('loadedmetadata', r, { once: true }));
+      layoutGuide(); $('off').hidden = true; $('badge').hidden = false;
+      running = true; $('start').textContent = 'Arrêter'; loop();
+    } catch (e) { $('off').hidden = false; $('off').textContent = 'Caméra indisponible : ' + (e.message || e); }
+    $('start').disabled = false;
   }
   function stop() {
     running = false; if (stream) stream.getTracks().forEach(t => t.stop());
-    if (worker) worker.terminate(); worker = null;
-    $('badge').hidden = true; $('off').hidden = false; $('off').textContent = 'Caméra arrêtée.';
-    $('start').textContent = 'Démarrer la caméra';
+    $('badge').hidden = true; $('off').hidden = false; $('off').textContent = 'Caméra arrêtée.'; $('start').textContent = 'Démarrer la caméra';
   }
   $('start').onclick = () => (running ? stop() : start());
+
+  // ---------- Apprentissage ----------
+  let selR = null, selS = null;
+  function renderLearn() {
+    $('rankChips').innerHTML = VALUES.map(v => `<button class="chip${selR === v.l ? ' sel' : ''}" data-r="${v.l}">${v.l}<small>${tpl.r.filter(t => t.l === v.l).length} ex.</small></button>`).join('');
+    $('suitChips').innerHTML = SUITS.map(s => `<button class="chip${s.red ? ' red' : ''}${selS === s.id ? ' sel' : ''}" data-s="${s.id}">${s.sym}<small>${tpl.s.filter(t => t.l === s.id).length} ex.</small></button>`).join('');
+    const miss = [...VALUES.filter(v => !tpl.r.some(t => t.l === v.l)).map(v => v.l), ...SUITS.filter(s => !tpl.s.some(t => t.l === s.id)).map(s => s.sym)];
+    $('learnMsg').textContent = miss.length ? 'Il manque encore : ' + miss.join(' ') : 'Tout est appris. Vous pouvez scanner.';
+  }
+  $('learn').onclick = e => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    if (b.dataset.r) selR = b.dataset.r; if (b.dataset.s) selS = b.dataset.s; renderLearn();
+  };
+  $('learnBtn').onclick = () => { $('learn').hidden = !$('learn').hidden; renderLearn(); };
+  $('saveTpl').onclick = () => {
+    if (!last || last.none) { $('learnMsg').textContent = 'Aucune carte lue : placez-la dans le cadre (caméra démarrée).'; return; }
+    if (!selR || !selS) { $('learnMsg').textContent = 'Choisissez le rang et la couleur de la carte.'; return; }
+    if (isRed(selS) !== last.red) { $('learnMsg').textContent = 'La couleur choisie ne correspond pas au rouge/noir vu par la caméra.'; return; }
+    tpl.r.push({ l: selR, f: last.rf }); tpl.s.push({ l: selS, f: last.sf }); store('manille-tpl-v1', tpl);
+    selR = selS = null; renderLearn();
+  };
+  $('clearTpl').onclick = () => { if (confirm('Oublier tout l\'apprentissage ?')) { tpl = { r: [], s: [] }; store('manille-tpl-v1', tpl); renderLearn(); } };
+
   render();
 </script>
 </body>
