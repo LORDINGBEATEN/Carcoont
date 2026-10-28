@@ -1,0 +1,2 @@
+Modèle : baloot-fan-v2 (osos3lom), licence MIT
+https://huggingface.co/osos3lom/baloot-fan-v2
