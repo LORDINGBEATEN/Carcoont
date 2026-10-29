@@ -169,7 +169,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 25;   // à incrémenter à chaque mise en ligne
+  const VERSION = 26;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -265,7 +265,7 @@
   let mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
   const center = (v, m) => { const o = new Float32Array(v.length); for (let i = 0; i < v.length; i++) o[i] = v[i] - m[i]; return unit(o); };
   function refit() {
-    const cards = S.filter(x => x.l !== 'fond');
+    const cards = S.filter(x => x.l !== 'fond' && !x.c);
     mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
     for (const x of cards) for (let i = 0; i < 1280; i++) { mu.a[i] += x.a[i] / cards.length; mu.b[i] += x.b[i] / cards.length; }
     for (const x of S) { x.ca = center(x.a, mu.a); x.cb = center(x.b, mu.b); }
@@ -273,6 +273,7 @@
   function predict(e) {   // ressemblance par étiquette (moyenne de ses 3 meilleurs exemples), de la plus à la moins ressemblante
     const ca = center(e.a, mu.a), cb = center(e.b, mu.b), by = {}; let bg = null;
     for (const s of S) {
+      if (s.c) continue;
       (by[s.l] || (by[s.l] = [])).push(.5 * (dot(ca, s.ca) + dot(cb, s.cb)));
       if (s.l === 'fond') { const r = sim(e, s); if (bg === null || r > bg) bg = r; }
     }
@@ -292,8 +293,9 @@
     add(x) { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').add(x); } catch (e) {} },
     clear() { if (this.h) try { this.h.transaction('s', 'readwrite').objectStore('s').clear(); } catch (e) {} },
   };
-  const addSample = (l, e) => { S.push({ l, a: e.a, b: e.b }); db.add({ l, a: e.a, b: e.b }); refit(); };
-  const nOf = l => S.filter(x => x.l === l).length;
+  // c : exemple de coin seul (pris sur une photo de pli), utilisé uniquement dans l'onglet Pli
+  const addSample = (l, e, c) => { const x = c ? { l, a: e.b, b: e.b, c: 1 } : { l, a: e.a, b: e.b }; S.push(x); db.add(x); refit(); };
+  const nOf = l => S.filter(x => x.l === l && !x.c).length;
 
   // ---------- Caméra ----------
   let stream, running = false, paused = false, mode = 'count';
@@ -439,7 +441,7 @@
     if (id !== 'fond' && nOf('fond') < NEED) return say('Enregistrez d\'abord le « Fond » (table sans carte).');
     target = target === id ? null : id; got = 0; stableN = 0; recN = 0; lastCap = 0;
     if (target && nOf(target)) {   // refaire une carte : on remplace ses anciens exemples
-      S = S.filter(x => x.l !== target); db.clear(); S.forEach(x => db.add({ l: x.l, a: x.a, b: x.b })); refit(); verified = verified.filter(x => x !== target); store('manille-ver-v1', verified);
+      S = S.filter(x => x.l !== target); db.clear(); S.forEach(x => db.add(x)); refit(); verified = verified.filter(x => x !== target); store('manille-ver-v1', verified);
     }
     phase = target ? 'collect' : 'idle'; renderLearn();
   }
@@ -513,16 +515,16 @@
       const out = (await session.run({ input: new ort.Tensor('float32', buf, [V.length, 3, IN, IN]) }))[session.outputNames[0]].data;
       if (tok !== pliTok) return;
       let best = null;
-      V.forEach((_, j) => { const r = cornerScores(unit(Float32Array.from(out.subarray(j * 1280, (j + 1) * 1280)))); if (!best || r[0][1] > best.r[0][1]) best = { r, j }; });
+      V.forEach((_, j) => { const e = unit(Float32Array.from(out.subarray(j * 1280, (j + 1) * 1280))), r = cornerScores(e); if (!best || r[0][1] > best.r[0][1]) best = { r, j, e }; });
       const [k, a] = V[best.j], cw = W * k * CORNER.w, ch = W * k * CARD_R * CORNER.h;   // vignette de la meilleure variante
       cx.save(); cx.fillStyle = '#fff'; cx.fillRect(0, 0, IN, IN); cx.translate(IN / 2, IN / 2); cx.scale(IN / cw, IN / ch); cx.rotate(-a * Math.PI / 180); cx.translate(-p.x, -p.y); cx.drawImage(src, 0, 0); cx.restore();
       const t = document.createElement('canvas'); t.width = t.height = 112; t.getContext('2d').drawImage(cx.canvas, 0, 0, 112, 112);
-      p.res = best.r.slice(0, 3); p.thumb = t.toDataURL('image/jpeg', .7); p.pick = best.r[0][0];
+      p.emb = best.e; p.res = best.r.slice(0, 3); p.thumb = t.toDataURL('image/jpeg', .7); p.pick = best.r[0][0];
     }
     drawPli(); renderPli();
   }
   function renderPli() {
-    $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch">`
+    $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch"><button data-x="1">✕</button>`
       + p.res.map(([l, s]) => `<button data-l="${l}" class="${p.pick === l ? 'on' : ''}">${cname(l)} <small>${Math.round(s * 100)}</small></button>`).join('')
       + `<select><option value="">autre…</option>${ALL_IDS.map(id => `<option value="${id}"${p.pick === id && !p.res.some(r => r[0] === id) ? ' selected' : ''}>${cname(id)}</option>`).join('')}</select></div></div>`).join('');
     const ids = pliPts.map(p => p.pick).filter(Boolean);
@@ -550,13 +552,16 @@
   $('pliW').oninput = () => { $('pliWv').textContent = $('pliW').value + ' %'; if (pliImg) { drawPli(); clearTimeout(pliW.t); pliW.t = setTimeout(analysePli, 300); } };
   $('pliRes').onclick = e => {
     const row = e.target.closest('.pr'), b = e.target.closest('button'); if (!row || !b) return;
+    if (b.dataset.x) { pliPts.splice(row.dataset.i, 1); drawPli(); renderPli(); return; }
     pliPts[row.dataset.i].pick = b.dataset.l; renderPli();
   };
   $('pliRes').onchange = e => { const row = e.target.closest('.pr'); if (row && e.target.value) { pliPts[row.dataset.i].pick = e.target.value; renderPli(); } };
   $('pliAdd').onclick = () => {
     const ids = [...new Set(pliPts.map(p => p.pick).filter(Boolean))], dup = ids.filter(id => taken.includes(id));
     ids.forEach(id => { if (!taken.includes(id)) taken.push(id); }); render();
-    $('pliMsg').textContent = `${ids.length - dup.length} carte(s) ajoutée(s)` + (dup.length ? ` · déjà comptées : ${dup.map(cname).join(' ')}` : '') + '. Prenez le pli suivant.';
+    pliPts.forEach(p => { if (p.pick && p.emb) addSample(p.pick, { b: p.emb }, true); });   // le coin validé devient un exemple
+    const nc = S.filter(x => x.c).length;
+    $('pliMsg').textContent = `${ids.length - dup.length} carte(s) ajoutée(s)` + (dup.length ? ` · déjà comptées : ${dup.map(cname).join(' ')}` : '') + `. ${nc} coins de plis mémorisés. Prenez le pli suivant.`;
     pliPts = []; drawPli(); renderPli();
   };
 
