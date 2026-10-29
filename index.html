@@ -114,6 +114,7 @@
 
   <section id="pli">
     <div class="actions"><button class="act" id="pliBtn">📷 Photographier le pli</button><button class="act alt" id="pliAuto">✨ Coins auto</button><button class="act alt" id="pliUndo">↩︎ Dernier point</button></div>
+    <div class="actions"><button class="act alt" id="pliGal">🖼 Choisir une photo existante</button></div>
     <input type="file" id="pliFile" accept="image/*" hidden>
     <p class="hint" id="pliMsg">Prenez une photo du pli, puis touchez le coin (rang + couleur) de chaque carte visible. Le cadre jaune doit entourer ce coin : réglez sa taille avec le curseur.</p>
     <label class="thr">Largeur d'une carte <input type="range" id="pliW" min="12" max="60" value="30"><b id="pliWv">30 %</b></label>
@@ -170,7 +171,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 31;   // à incrémenter à chaque mise en ligne
+  const VERSION = 32;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -405,6 +406,7 @@
   async function setMode(m) {
     if (m === 'learn' && !running) await start();
     if (m === 'pli' && running) stop();
+    if (m !== 'pli' && typeof pliStopLive === 'function') pliStopLive();
     mode = m; document.body.dataset.mode = m;
     ['Count', 'Learn', 'An', 'Pli'].forEach(k => $('tab' + k).classList.toggle('on', k.toLowerCase() === m));
     target = null; phase = 'idle'; hist = [];
@@ -653,7 +655,31 @@
     const ids = pliPts.map(p => p.pick).filter(Boolean);
     $('pliAdd').disabled = !ids.length; $('pliAdd').textContent = ids.length ? `Ajouter ${ids.length} carte${ids.length > 1 ? 's' : ''} au compteur` : 'Ajouter au compteur';
   }
-  $('pliBtn').onclick = () => { unlockAudio(); $('pliFile').click(); };
+  // Photo prise dans la page : l'image reste en mémoire, elle n'est enregistrée nulle part (ni galerie ni appareil).
+  let pStream = null, pVid = null, pLive = false;
+  function pliStopLive() {
+    pLive = false; if (pStream) pStream.getTracks().forEach(t => t.stop()); pStream = null; pVid = null; $('pliBtn').textContent = '📷 Photographier le pli';
+  }
+  async function pliLive() {
+    unlockAudio();
+    try {
+      pStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 } }, audio: false });
+      const v = document.createElement('video'); v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = pStream; await v.play(); pVid = v;
+      for (let i = 0; i < 50 && !v.videoWidth; i++) await new Promise(r => setTimeout(r, 40));
+    } catch (e) { pliStopLive(); $('pliMsg').textContent = 'Caméra indisponible : ' + (e.message || e); return; }
+    pliImg = null; pliPts = []; renderPli(); pLive = true; $('pliBtn').textContent = '📸 Prendre la photo';
+    const cv = $('pliCv'); cv.hidden = false; cv.width = pVid.videoWidth; cv.height = pVid.videoHeight;
+    $('pliMsg').textContent = 'Cadrez le pli, puis touchez « Prendre la photo ».';
+    const draw = () => { if (!pLive) return; cv.getContext('2d').drawImage(pVid, 0, 0, cv.width, cv.height); requestAnimationFrame(draw); }; draw();
+  }
+  function pliShot() {
+    const w = pVid.videoWidth, h = pVid.videoHeight, r = Math.min(1, 1600 / Math.max(w, h)), cw = Math.round(w * r), ch = Math.round(h * r);
+    pliImg = document.createElement('canvas'); pliImg.width = cw; pliImg.height = ch; pliImg.getContext('2d').drawImage(pVid, 0, 0, cw, ch);
+    pliStopLive(); const cv = $('pliCv'); cv.width = cw; cv.height = ch; pliPts = []; drawPli(); renderPli();
+    $('pliMsg').textContent = 'Touchez le coin de chaque carte, ou « Coins auto ».';
+  }
+  $('pliBtn').onclick = () => pLive ? pliShot() : pliLive();
+  $('pliGal').onclick = () => { pliStopLive(); $('pliFile').click(); };
   $('pliFile').onchange = async () => {
     const f = $('pliFile').files[0]; if (!f) return;
     const url = URL.createObjectURL(f), im = new Image();
