@@ -169,7 +169,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 28;   // à incrémenter à chaque mise en ligne
+  const VERSION = 29;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -479,8 +479,9 @@
   // ---------- Pli : photo de plusieurs cartes qui se chevauchent ----------
   // Seuls les coins (rang + couleur) sont visibles : on touche chaque coin sur la photo, l'application en prend l'empreinte
   // (plusieurs tailles et inclinaisons, on garde la meilleure) et la compare aux empreintes de coin apprises.
+  // inclinaisons essayées : coin en haut à gauche (±20°) et coin du bas, à l'envers (180° ±20°)
   let pliImg = null, pliPts = [], pliTok = 0;
-  const PLI_K = [.85, 1, 1.18], PLI_A = [-20, -10, 0, 10, 20], CARD_R = 1.4;
+  const PLI_K = [.85, 1, 1.18], PLI_A = [-20, -10, 0, 10, 20, 160, 170, 180, 190, 200], CARD_R = 1.4;
   const ALL_IDS = SUITS.flatMap(su => VALUES.map(v => `${su.id}-${v.l}`));
   const pliW = () => $('pliW').value / 100 * pliImg.width;
   function cornerScores(b) {   // ressemblance de ce coin avec chaque carte apprise
@@ -551,15 +552,14 @@
       const t = document.createElement('canvas'); t.width = t.height = 112; t.getContext('2d').drawImage(cx.canvas, 0, 0, 112, 112);
       p.emb = best.e; p.er = best.r; p.thumb = t.toDataURL('image/jpeg', .7);
     }
-    const used = new Set();   // un pli ne contient pas deux fois la même carte : le coin le plus sûr garde sa carte, les autres prennent la suivante
-    pliPts.forEach(p => { const y = yoloAt(p.x, p.y); p.fu = fuse(p.er, y); p.res = p.fu.slice(0, 3); p.eTop = p.er[0][0]; const yb = y && ALL_IDS.reduce((a, b) => y[classOf(b)] > y[classOf(a)] ? b : a); p.yTop = y && y[classOf(yb)] > .15 && y[classOf(yb)] >= y[32] ? yb : null; p.yTxt = !y || !y.some(v => v > .1) ? 'rien vu' : p.yTop ? cname(p.yTop) : 'carte non lue'; });
-    [...pliPts].sort((a, b) => b.fu[0][1] - a.fu[0][1]).forEach(p => { const f = p.fu.find(([l]) => !used.has(l)); p.pick = f[0]; used.add(f[0]); if (!p.res.some(r => r[0] === p.pick)) p.res = [f, ...p.res.slice(0, 2)]; });
+    pliPts.forEach(p => { const y = yoloAt(p.x, p.y); p.fu = fuse(p.er, y); p.res = p.fu.slice(0, 3); p.pick = p.fu[0][0]; p.eTop = p.er[0][0];
+      const yb = y && ALL_IDS.reduce((a, b) => y[classOf(b)] > y[classOf(a)] ? b : a); p.yTop = y && y[classOf(yb)] > .15 && y[classOf(yb)] >= y[32] ? yb : null; p.yTxt = !y || !y.some(v => v > .1) ? 'rien vu' : p.yTop ? cname(p.yTop) : 'carte non lue'; });
     drawPli(); renderPli();
   }
   function renderPli() {
     $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch"><button data-x="1">✕</button>`
       + p.res.map(([l, s]) => `<button data-l="${l}" class="${p.pick === l ? 'on' : ''}">${cname(l)} <small>${Math.round(s * 100)}</small></button>`).join('')
-      + `<small style="flex-basis:100%;opacity:.8">Empreinte : ${cname(p.eTop)} · YOLO : ${p.yTxt}${p.yTop && p.yTop === p.eTop ? ' ✓ d\'accord' : ''}</small>`
+      + `<small style="flex-basis:100%;opacity:.8">${pliPts.some((q, k) => k < i && q.pick === p.pick) ? '⚠ même carte qu\'un point précédent (autre coin ?) · ' : ''}Empreinte : ${cname(p.eTop)} · YOLO : ${p.yTxt}${p.yTop && p.yTop === p.eTop ? ' ✓ d\'accord' : ''}</small>`
       + `<select><option value="">autre…</option>${ALL_IDS.map(id => `<option value="${id}"${p.pick === id && !p.res.some(r => r[0] === id) ? ' selected' : ''}>${cname(id)}</option>`).join('')}</select></div></div>`).join('');
     const ids = pliPts.map(p => p.pick).filter(Boolean);
     $('pliAdd').disabled = !ids.length; $('pliAdd').textContent = ids.length ? `Ajouter ${ids.length} carte${ids.length > 1 ? 's' : ''} au compteur` : 'Ajouter au compteur';
