@@ -169,7 +169,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 26;   // à incrémenter à chaque mise en ligne
+  const VERSION = 27;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -488,6 +488,36 @@
     for (const s of S) if (s.l !== 'fond') (by[s.l] || (by[s.l] = [])).push(dot(cb, s.cb));
     return Object.entries(by).map(([l, v]) => { v.sort((x, y) => y - x); const k = v.slice(0, 3); return [l, k.reduce((x, y) => x + y, 0) / k.length]; }).sort((x, y) => y[1] - x[1]);
   }
+  // Second algorithme : YOLO (baloot-fan-v2, MIT) lit la photo entière ; on croise son avis avec l'empreinte pour chaque coin touché.
+  const M_SUITS = ['coeur', 'carreau', 'trefle', 'pique'], M_RANKS = ['A', 'R', 'D', 'V', '10', '9', '8', '7'], YS = 704;
+  const classOf = id => M_SUITS.indexOf(id.split('-')[0]) * 8 + M_RANKS.indexOf(id.split('-')[1]);
+  let ysession = null, yraw = null, yTried = false;
+  async function runYolo() {
+    if (!yTried) { yTried = true; try { ysession = await ort.InferenceSession.create('model/baloot-fan-v2.int8.onnx', { executionProviders: ['wasm'] }); } catch (e) { ysession = null; } }
+    if (!ysession) { yraw = null; return; }
+    const c = document.createElement('canvas'); c.width = c.height = YS; const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(pliImg, 0, 0, YS, YS);   // étirée sans conserver les proportions, comme à l'entraînement du modèle
+    const px = x.getImageData(0, 0, YS, YS).data, n = YS * YS, f = new Float32Array(3 * n);
+    for (let i = 0; i < n; i++) { f[i] = px[i * 4] / 255; f[n + i] = px[i * 4 + 1] / 255; f[2 * n + i] = px[i * 4 + 2] / 255; }
+    try { const o = (await ysession.run({ images: new ort.Tensor('float32', f, [1, 3, YS, YS]) })).output0; yraw = { d: o.data, N: o.dims[2] }; } catch (e) { yraw = null; }
+  }
+  function yoloAt(px, py) {   // pour chaque classe : meilleur score parmi les boîtes YOLO qui contiennent le point touché
+    if (!yraw) return null;
+    const { d, N } = yraw, X = px / pliImg.width * YS, Y = py / pliImg.height * YS, y = new Float32Array(32);
+    for (let i = 0; i < N; i++) {
+      const cx = d[i], cy = d[N + i], w = d[2 * N + i], h = d[3 * N + i];
+      if (Math.abs(X - cx) > w / 2 || Math.abs(Y - cy) > h / 2) continue;
+      for (let c = 0; c < 32; c++) { const v = d[(4 + c) * N + i]; if (v > y[c]) y[c] = v; }
+    }
+    return y;
+  }
+  function fuse(r, y) {   // empreinte (cosinus → probabilité) et YOLO (scores normalisés) à poids égal ; l'un seul si l'autre ne dit rien
+    const T = .04, em = {}; let mn = 1; r.forEach(([l, s]) => { em[l] = s; mn = Math.min(mn, s); });
+    const top = r.length ? r[0][1] : 0, ex = {}; let es = 0;
+    for (const id of ALL_IDS) { ex[id] = Math.exp(((id in em ? em[id] : mn - .05) - top) / T); es += ex[id]; }
+    const ys = y ? y.reduce((a, b) => a + b, 0) : 0, useY = ys > .15, useE = r.length > 0;
+    return ALL_IDS.map(id => [id, (useE ? (useY ? .5 : 1) * ex[id] / es : 0) + (useY ? (useE ? .5 : 1) * y[classOf(id)] / ys : 0)]).sort((a, b) => b[1] - a[1]);
+  }
   function drawPli() {
     const cv = $('pliCv'), x = cv.getContext('2d'), W = pliW(), u = cv.width / 640;
     x.drawImage(pliImg, 0, 0); x.lineWidth = 3 * u; x.font = `bold ${22 * u}px sans-serif`;
@@ -502,7 +532,7 @@
     const tok = ++pliTok;
     if (!pliImg || !pliPts.length) { renderPli(); return; }
     if (!S.some(x => x.l !== 'fond')) { $('pliMsg').textContent = 'Aucune carte apprise : faites d\'abord l\'apprentissage.'; return; }
-    await loadModel();
+    await loadModel(); await runYolo(); if (tok !== pliTok) return;
     const W = pliW(), V = [];
     for (const k of PLI_K) for (const a of PLI_A) V.push([k, a]);
     const buf = new Float32Array(V.length * 3 * IN * IN), cx = cx1, src = pliImg;
@@ -519,13 +549,17 @@
       const [k, a] = V[best.j], cw = W * k * CORNER.w, ch = W * k * CARD_R * CORNER.h;   // vignette de la meilleure variante
       cx.save(); cx.fillStyle = '#fff'; cx.fillRect(0, 0, IN, IN); cx.translate(IN / 2, IN / 2); cx.scale(IN / cw, IN / ch); cx.rotate(-a * Math.PI / 180); cx.translate(-p.x, -p.y); cx.drawImage(src, 0, 0); cx.restore();
       const t = document.createElement('canvas'); t.width = t.height = 112; t.getContext('2d').drawImage(cx.canvas, 0, 0, 112, 112);
-      p.emb = best.e; p.res = best.r.slice(0, 3); p.thumb = t.toDataURL('image/jpeg', .7); p.pick = best.r[0][0];
+      p.emb = best.e; p.er = best.r; p.thumb = t.toDataURL('image/jpeg', .7);
     }
+    const used = new Set();   // un pli ne contient pas deux fois la même carte : le coin le plus sûr garde sa carte, les autres prennent la suivante
+    pliPts.forEach(p => { const y = yoloAt(p.x, p.y); p.fu = fuse(p.er, y); p.res = p.fu.slice(0, 3); p.eTop = p.er[0][0]; p.yTop = y && y.some(v => v > .15) ? ALL_IDS.reduce((a, b) => y[classOf(b)] > y[classOf(a)] ? b : a) : null; });
+    [...pliPts].sort((a, b) => b.fu[0][1] - a.fu[0][1]).forEach(p => { const f = p.fu.find(([l]) => !used.has(l)); p.pick = f[0]; used.add(f[0]); if (!p.res.some(r => r[0] === p.pick)) p.res = [f, ...p.res.slice(0, 2)]; });
     drawPli(); renderPli();
   }
   function renderPli() {
     $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch"><button data-x="1">✕</button>`
       + p.res.map(([l, s]) => `<button data-l="${l}" class="${p.pick === l ? 'on' : ''}">${cname(l)} <small>${Math.round(s * 100)}</small></button>`).join('')
+      + `<small style="flex-basis:100%;opacity:.8">Empreinte : ${cname(p.eTop)} · YOLO : ${p.yTop ? cname(p.yTop) : '—'}${p.yTop && p.yTop === p.eTop ? ' ✓ d\'accord' : ''}</small>`
       + `<select><option value="">autre…</option>${ALL_IDS.map(id => `<option value="${id}"${p.pick === id && !p.res.some(r => r[0] === id) ? ' selected' : ''}>${cname(id)}</option>`).join('')}</select></div></div>`).join('');
     const ids = pliPts.map(p => p.pick).filter(Boolean);
     $('pliAdd').disabled = !ids.length; $('pliAdd').textContent = ids.length ? `Ajouter ${ids.length} carte${ids.length > 1 ? 's' : ''} au compteur` : 'Ajouter au compteur';
