@@ -113,7 +113,7 @@
   </section>
 
   <section id="pli">
-    <div class="actions"><button class="act" id="pliBtn">📷 Photographier le pli</button><button class="act alt" id="pliUndo">↩︎ Dernier point</button></div>
+    <div class="actions"><button class="act" id="pliBtn">📷 Photographier le pli</button><button class="act alt" id="pliAuto">✨ Coins auto</button><button class="act alt" id="pliUndo">↩︎ Dernier point</button></div>
     <input type="file" id="pliFile" accept="image/*" hidden>
     <p class="hint" id="pliMsg">Prenez une photo du pli, puis touchez le coin (rang + couleur) de chaque carte visible. Le cadre jaune doit entourer ce coin : réglez sa taille avec le curseur.</p>
     <label class="thr">Largeur d'une carte <input type="range" id="pliW" min="12" max="60" value="30"><b id="pliWv">30 %</b></label>
@@ -169,7 +169,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 27;   // à incrémenter à chaque mise en ligne
+  const VERSION = 28;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -503,11 +503,11 @@
   }
   function yoloAt(px, py) {   // pour chaque classe : meilleur score parmi les boîtes YOLO qui contiennent le point touché
     if (!yraw) return null;
-    const { d, N } = yraw, X = px / pliImg.width * YS, Y = py / pliImg.height * YS, y = new Float32Array(32);
+    const { d, N } = yraw, X = px / pliImg.width * YS, Y = py / pliImg.height * YS, y = new Float32Array(33);   // classe 32 = « autre » (carte que le modèle ne sait pas lire)
     for (let i = 0; i < N; i++) {
       const cx = d[i], cy = d[N + i], w = d[2 * N + i], h = d[3 * N + i];
-      if (Math.abs(X - cx) > w / 2 || Math.abs(Y - cy) > h / 2) continue;
-      for (let c = 0; c < 32; c++) { const v = d[(4 + c) * N + i]; if (v > y[c]) y[c] = v; }
+      if (Math.abs(X - cx) > w * .6 || Math.abs(Y - cy) > h * .6) continue;
+      for (let c = 0; c < 33; c++) { const v = d[(4 + c) * N + i]; if (v > y[c]) y[c] = v; }
     }
     return y;
   }
@@ -515,7 +515,7 @@
     const T = .04, em = {}; let mn = 1; r.forEach(([l, s]) => { em[l] = s; mn = Math.min(mn, s); });
     const top = r.length ? r[0][1] : 0, ex = {}; let es = 0;
     for (const id of ALL_IDS) { ex[id] = Math.exp(((id in em ? em[id] : mn - .05) - top) / T); es += ex[id]; }
-    const ys = y ? y.reduce((a, b) => a + b, 0) : 0, useY = ys > .15, useE = r.length > 0;
+    const ys = y ? y.slice(0, 32).reduce((a, b) => a + b, 0) : 0, useY = ys > .15 && ys >= y[32], useE = r.length > 0;
     return ALL_IDS.map(id => [id, (useE ? (useY ? .5 : 1) * ex[id] / es : 0) + (useY ? (useE ? .5 : 1) * y[classOf(id)] / ys : 0)]).sort((a, b) => b[1] - a[1]);
   }
   function drawPli() {
@@ -552,14 +552,14 @@
       p.emb = best.e; p.er = best.r; p.thumb = t.toDataURL('image/jpeg', .7);
     }
     const used = new Set();   // un pli ne contient pas deux fois la même carte : le coin le plus sûr garde sa carte, les autres prennent la suivante
-    pliPts.forEach(p => { const y = yoloAt(p.x, p.y); p.fu = fuse(p.er, y); p.res = p.fu.slice(0, 3); p.eTop = p.er[0][0]; p.yTop = y && y.some(v => v > .15) ? ALL_IDS.reduce((a, b) => y[classOf(b)] > y[classOf(a)] ? b : a) : null; });
+    pliPts.forEach(p => { const y = yoloAt(p.x, p.y); p.fu = fuse(p.er, y); p.res = p.fu.slice(0, 3); p.eTop = p.er[0][0]; const yb = y && ALL_IDS.reduce((a, b) => y[classOf(b)] > y[classOf(a)] ? b : a); p.yTop = y && y[classOf(yb)] > .15 && y[classOf(yb)] >= y[32] ? yb : null; p.yTxt = !y || !y.some(v => v > .1) ? 'rien vu' : p.yTop ? cname(p.yTop) : 'carte non lue'; });
     [...pliPts].sort((a, b) => b.fu[0][1] - a.fu[0][1]).forEach(p => { const f = p.fu.find(([l]) => !used.has(l)); p.pick = f[0]; used.add(f[0]); if (!p.res.some(r => r[0] === p.pick)) p.res = [f, ...p.res.slice(0, 2)]; });
     drawPli(); renderPli();
   }
   function renderPli() {
     $('pliRes').innerHTML = pliPts.map((p, i) => !p.res ? '' : `<div class="pr" data-i="${i}"><img src="${p.thumb}" alt=""><div class="ch"><button data-x="1">✕</button>`
       + p.res.map(([l, s]) => `<button data-l="${l}" class="${p.pick === l ? 'on' : ''}">${cname(l)} <small>${Math.round(s * 100)}</small></button>`).join('')
-      + `<small style="flex-basis:100%;opacity:.8">Empreinte : ${cname(p.eTop)} · YOLO : ${p.yTop ? cname(p.yTop) : '—'}${p.yTop && p.yTop === p.eTop ? ' ✓ d\'accord' : ''}</small>`
+      + `<small style="flex-basis:100%;opacity:.8">Empreinte : ${cname(p.eTop)} · YOLO : ${p.yTxt}${p.yTop && p.yTop === p.eTop ? ' ✓ d\'accord' : ''}</small>`
       + `<select><option value="">autre…</option>${ALL_IDS.map(id => `<option value="${id}"${p.pick === id && !p.res.some(r => r[0] === id) ? ' selected' : ''}>${cname(id)}</option>`).join('')}</select></div></div>`).join('');
     const ids = pliPts.map(p => p.pick).filter(Boolean);
     $('pliAdd').disabled = !ids.length; $('pliAdd').textContent = ids.length ? `Ajouter ${ids.length} carte${ids.length > 1 ? 's' : ''} au compteur` : 'Ajouter au compteur';
@@ -581,6 +581,18 @@
     const cv = $('pliCv'), r = cv.getBoundingClientRect();
     pliPts.push({ x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height });
     drawPli(); $('pliMsg').textContent = 'Analyse…'; analysePli().then(() => { $('pliMsg').textContent = 'Touchez une proposition pour la corriger, ou un autre coin pour l\'ajouter.'; });
+  };
+  $('pliAuto').onclick = async () => {   // YOLO repère les coins (même quand il ne sait pas lire la carte)
+    if (!pliImg) { $('pliMsg').textContent = 'Prenez d\'abord la photo.'; return; }
+    $('pliMsg').textContent = 'Détection des coins…'; await runYolo();
+    if (!yraw) { $('pliMsg').textContent = 'Modèle YOLO indisponible : touchez les coins.'; return; }
+    const { d, N } = yraw, all = [];
+    for (let i = 0; i < N; i++) { let bs = 0; for (let c = 0; c < 33; c++) bs = Math.max(bs, d[(4 + c) * N + i]); if (bs >= .4) all.push({ s: bs, x: d[i], y: d[N + i], w: d[2 * N + i] }); }
+    all.sort((a, b) => b.s - a.s); const keep = [];
+    for (const a of all) if (keep.every(k => Math.hypot(k.x - a.x, k.y - a.y) > .6 * Math.min(k.w, a.w))) keep.push(a);
+    pliPts = keep.slice(0, 8).map(k => ({ x: k.x / YS * pliImg.width, y: k.y / YS * pliImg.height }));
+    drawPli(); await analysePli();
+    $('pliMsg').textContent = `${pliPts.length} coin(s) trouvé(s) : supprimez avec ✕ ceux qui n'en sont pas, touchez la photo pour en ajouter.`;
   };
   $('pliUndo').onclick = () => { pliPts.pop(); if (pliImg) drawPli(); analysePli(); };
   $('pliW').oninput = () => { $('pliWv').textContent = $('pliW').value + ' %'; if (pliImg) { drawPli(); clearTimeout(pliW.t); pliW.t = setTimeout(analysePli, 300); } };
