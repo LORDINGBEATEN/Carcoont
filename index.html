@@ -120,6 +120,7 @@
     <canvas id="pliCv" hidden></canvas>
     <div id="pliRes"></div>
     <div class="actions"><button class="act" id="pliAdd" disabled>Ajouter au compteur</button></div>
+    <div class="actions"><button class="act alt" id="pliForget">Oublier les coins de plis mémorisés</button></div>
   </section>
 
   <section id="analysis">
@@ -169,7 +170,7 @@
   const cname = id => id === 'fond' ? 'fond' : id.split('-')[1] + suitOf(id).sym;
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const VERSION = 29;   // à incrémenter à chaque mise en ligne
+  const VERSION = 30;   // à incrémenter à chaque mise en ligne
 
   let taken = load('manille-v3', []);   // cartes comptées, dans l'ordre
   let hist = [];                         // cartes reconnues sur les dernières images (vote)
@@ -264,11 +265,17 @@
   // cartes apprises avant de comparer : les écarts entre cartes (donc les marges) deviennent bien plus nets.
   let mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
   const center = (v, m) => { const o = new Float32Array(v.length); for (let i = 0; i < v.length; i++) o[i] = v[i] - m[i]; return unit(o); };
+  let muc = null;   // moyenne des coins pris sur photo de pli
   function refit() {
     const cards = S.filter(x => x.l !== 'fond' && !x.c);
     mu = { a: new Float32Array(1280), b: new Float32Array(1280) };
     for (const x of cards) for (let i = 0; i < 1280; i++) { mu.a[i] += x.a[i] / cards.length; mu.b[i] += x.b[i] / cards.length; }
     for (const x of S) { x.ca = center(x.a, mu.a); x.cb = center(x.b, mu.b); }
+    const cs = S.filter(x => x.c); muc = null;
+    if (cs.length >= 8 && new Set(cs.map(x => x.l)).size >= 4) {
+      muc = new Float32Array(1280); for (const x of cs) for (let i = 0; i < 1280; i++) muc[i] += x.b[i] / cs.length;
+      for (const x of cs) x.cc = center(x.b, muc);
+    }
   }
   function predict(e) {   // ressemblance par étiquette (moyenne de ses 3 meilleurs exemples), de la plus à la moins ressemblante
     const ca = center(e.a, mu.a), cb = center(e.b, mu.b), by = {}; let bg = null;
@@ -484,10 +491,16 @@
   const PLI_K = [.85, 1, 1.18], PLI_A = [-20, -10, 0, 10, 20, 160, 170, 180, 190, 200], CARD_R = 1.4;
   const ALL_IDS = SUITS.flatMap(su => VALUES.map(v => `${su.id}-${v.l}`));
   const pliW = () => $('pliW').value / 100 * pliImg.width;
-  function cornerScores(b) {   // ressemblance de ce coin avec chaque carte apprise
-    const cb = center(b, mu.b), by = {};
-    for (const s of S) if (s.l !== 'fond') (by[s.l] || (by[s.l] = [])).push(dot(cb, s.cb));
-    return Object.entries(by).map(([l, v]) => { v.sort((x, y) => y - x); const k = v.slice(0, 3); return [l, k.reduce((x, y) => x + y, 0) / k.length]; }).sort((x, y) => y[1] - x[1]);
+  // Les coins pris sur photo de pli se ressemblent entre eux (lumière, grain) : ils attireraient tous les nouveaux coins. On les compare donc
+  // entre eux après retrait de leur propre moyenne, et seulement quand il y en a assez (8 sur au moins 4 cartes) ; sinon ils sont ignorés.
+  function cornerScores(b) {
+    const cb = center(b, mu.b), cq = muc ? center(b, muc) : null, live = {}, ph = {};
+    for (const s of S) {
+      if (s.l === 'fond') continue;
+      if (s.c) { if (cq) (ph[s.l] || (ph[s.l] = [])).push(dot(cq, s.cc)); } else (live[s.l] || (live[s.l] = [])).push(dot(cb, s.cb));
+    }
+    const top = v => { v.sort((x, y) => y - x); const k = v.slice(0, 3); return k.reduce((x, y) => x + y, 0) / k.length; };
+    return [...new Set([...Object.keys(live), ...Object.keys(ph)])].map(l => [l, live[l] && ph[l] ? .5 * (top(live[l]) + top(ph[l])) : top(live[l] || ph[l])]).sort((x, y) => y[1] - x[1]);
   }
   // Second algorithme : YOLO (baloot-fan-v2, MIT) lit la photo entière ; on croise son avis avec l'empreinte pour chaque coin touché.
   const M_SUITS = ['coeur', 'carreau', 'trefle', 'pique'], M_RANKS = ['A', 'R', 'D', 'V', '10', '9', '8', '7'], YS = 704;
@@ -593,6 +606,10 @@
     pliPts = keep.slice(0, 8).map(k => ({ x: k.x / YS * pliImg.width, y: k.y / YS * pliImg.height }));
     drawPli(); await analysePli();
     $('pliMsg').textContent = `${pliPts.length} coin(s) trouvé(s) : supprimez avec ✕ ceux qui n'en sont pas, touchez la photo pour en ajouter.`;
+  };
+  $('pliForget').onclick = () => {
+    const n = S.filter(x => x.c).length; if (!n || !confirm(`Oublier les ${n} coins de plis mémorisés ? (l'apprentissage de la caméra est conservé)`)) return;
+    S = S.filter(x => !x.c); db.clear(); S.forEach(x => db.add(x)); refit(); analysePli(); $('pliMsg').textContent = 'Coins de plis oubliés.';
   };
   $('pliUndo').onclick = () => { pliPts.pop(); if (pliImg) drawPli(); analysePli(); };
   $('pliW').oninput = () => { $('pliWv').textContent = $('pliW').value + ' %'; if (pliImg) { drawPli(); clearTimeout(pliW.t); pliW.t = setTimeout(analysePli, 300); } };
